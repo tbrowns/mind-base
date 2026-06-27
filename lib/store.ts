@@ -28,6 +28,10 @@ function firestoreData<T extends { id: string }>(record: T) {
 }
 
 function getDataFile() {
+  return path.join(process.cwd(), ".data", "mindbase.json");
+}
+
+function getLegacyDataFile() {
   return path.join(process.cwd(), ".data", "kuzana.json");
 }
 
@@ -36,14 +40,18 @@ async function localRead(): Promise<Data> {
   try {
     return JSON.parse(await fs.readFile(dataFile, "utf8"));
   } catch {
-    return {
-      documents: [],
-      chunks: [],
-      chats: [],
-      ingestionJobs: [],
-      emailImports: [],
-      meetingImports: [],
-    };
+    try {
+      return JSON.parse(await fs.readFile(getLegacyDataFile(), "utf8"));
+    } catch {
+      return {
+        documents: [],
+        chunks: [],
+        chats: [],
+        ingestionJobs: [],
+        emailImports: [],
+        meetingImports: [],
+      };
+    }
   }
 }
 async function localWrite(data: Data) {

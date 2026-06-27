@@ -79,7 +79,7 @@ export default function InboxPage() {
     <div className="mx-auto max-w-[1500px] px-5 py-9 md:px-8 lg:px-10">
       <PageHeader
         eyebrow="Automated knowledge intake"
-        title="Brain Inbox"
+        title="Mindbase Inbox"
         description="Review Gmail knowledge before it becomes searchable. Meeting imports appear here as an audit trail."
         action={
           <div className="flex items-center gap-3">
@@ -211,7 +211,7 @@ export default function InboxPage() {
             <div className="px-5 py-16 text-center">
               <Inbox className="mx-auto text-[#9ba59e]" />
               <h3 className="mt-4 text-sm font-semibold">
-                Your Brain Inbox is clear
+                Your Mindbase Inbox is clear
               </h3>
               <p className="mt-1 text-xs text-[#89928c]">
                 Sync Gmail or import a meeting to bring in new knowledge.

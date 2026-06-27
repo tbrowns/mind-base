@@ -7,15 +7,82 @@ const DISCOVERY_DOC =
   "https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest";
 const SCOPES = "https://www.googleapis.com/auth/gmail.readonly";
 
-let tokenClient: any;
+type GoogleToken = {
+  access_token?: string;
+};
+
+type GoogleTokenResponse = GoogleToken & {
+  error?: string;
+};
+
+type TokenClient = {
+  callback: "" | ((response: GoogleTokenResponse) => void);
+  requestAccessToken: (options: { prompt: string }) => void;
+};
+
+type GmailPayloadPart = {
+  headers?: { name: string; value: string }[];
+  mimeType?: string;
+  body?: { data?: string };
+  parts?: GmailPayloadPart[];
+};
+
+type GmailApiMessage = {
+  id: string;
+  threadId?: string;
+  snippet?: string;
+  payload?: GmailPayloadPart;
+};
+
+type GapiClient = {
+  init: (options: { apiKey: string; discoveryDocs: string[] }) => Promise<void>;
+  getToken: () => GoogleToken | null;
+  setToken: (token: string | GoogleToken | null) => void;
+  gmail: {
+    users: {
+      messages: {
+        list: (options: {
+          userId: string;
+          q: string;
+          maxResults: number;
+        }) => Promise<{ result: { messages?: { id: string }[] } }>;
+        get: (options: {
+          userId: string;
+          id: string;
+          format: string;
+        }) => Promise<{ result: GmailApiMessage }>;
+      };
+    };
+  };
+};
+
+type Gapi = {
+  load: (library: string, callback: () => void) => void;
+  client: GapiClient;
+};
+
+type GoogleIdentity = {
+  accounts?: {
+    oauth2?: {
+      initTokenClient: (options: {
+        client_id: string;
+        scope: string;
+        callback: "";
+      }) => TokenClient;
+      revoke: (token?: string) => void;
+    };
+  };
+};
+
+let tokenClient: TokenClient | null = null;
 let gapiInited = false;
 let gisInited = false;
 let accessToken: string | null = null;
 
 declare global {
   interface Window {
-    gapi: any;
-    google: any;
+    gapi: Gapi;
+    google: GoogleIdentity;
   }
 }
 
@@ -111,13 +178,13 @@ export async function requestAccessToken(): Promise<string | null> {
       return;
     }
 
-    tokenClient.callback = (resp: any) => {
+    tokenClient.callback = (resp) => {
       if (resp.error !== undefined) {
         console.error("OAuth error:", resp.error);
         resolve(null);
       } else {
-        accessToken = resp.access_token;
-        resolve(resp.access_token);
+        accessToken = resp.access_token ?? null;
+        resolve(resp.access_token ?? null);
       }
     };
 
@@ -184,7 +251,7 @@ export async function fetchGmailMessages(): Promise<GmailMessage[]> {
       const msg = message.result;
       const headers = msg.payload?.headers || [];
       const getHeader = (name: string) =>
-        headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())
+        headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
           ?.value || "";
 
       let text = extractPlainText(msg.payload);
@@ -224,7 +291,7 @@ function decodeBase64Url(value?: string | null): string {
 /**
  * Helper: Extract plain text from message part
  */
-function extractPlainText(part: any): string {
+function extractPlainText(part?: GmailPayloadPart): string {
   if (part?.mimeType === "text/plain") {
     return decodeBase64Url(part?.body?.data);
   }

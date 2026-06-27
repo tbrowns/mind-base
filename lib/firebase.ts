@@ -8,10 +8,6 @@ const FIREBASE_KEYS = [
   "FIREBASE_PRIVATE_KEY",
 ] as const;
 
-export function localStorageEnabled() {
-  return process.env.LOCAL_DEMO_STORAGE === "true";
-}
-
 export function firebaseConfigured() {
   return FIREBASE_KEYS.every((key) => Boolean(process.env[key]));
 }
@@ -40,7 +36,6 @@ async function withTimeout<T>(
 }
 
 export async function getAdminDb(): Promise<Firestore | null> {
-  if (localStorageEnabled()) return null;
   const missing = FIREBASE_KEYS.filter((key) => !process.env[key]);
   if (missing.length) {
     throw new Error(
@@ -69,13 +64,6 @@ export async function getAdminDb(): Promise<Firestore | null> {
 }
 
 export async function probeFirestore() {
-  if (localStorageEnabled()) {
-    return {
-      configured: true,
-      connected: true,
-      mode: "Explicit local demo storage",
-    };
-  }
   if (!firebaseConfigured()) {
     return {
       configured: false,
@@ -92,7 +80,8 @@ export async function probeFirestore() {
       configured: true,
       connected: false,
       mode: "Firestore connection failed",
-      error: error instanceof Error ? error.message : "Unknown Firestore error.",
+      error:
+        error instanceof Error ? error.message : "Unknown Firestore error.",
     };
   }
 }

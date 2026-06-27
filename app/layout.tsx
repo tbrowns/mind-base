@@ -10,8 +10,8 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Kuzana Brain Lite",
-  description: "Ask Kuzana’s internal knowledge. Get cited answers instantly.",
+  title: "Mindbase",
+  description: "Ask your internal knowledge base and get cited answers instantly.",
 };
 
 export default function RootLayout({
@@ -20,11 +20,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} h-full antialiased`}
-    >
-      <body><RoleProvider><AppShell>{children}</AppShell></RoleProvider></body>
+    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
+      <body>
+        <RoleProvider>
+          <AppShell>{children}</AppShell>
+        </RoleProvider>
+      </body>
     </html>
   );
 }

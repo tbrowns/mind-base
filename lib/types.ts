@@ -77,6 +77,8 @@ export type ChunkRecord = {
   chunkIndex: number;
   text: string;
   maskedText: string;
+  score?: number;
+  relevanceScore?: number;
   embedding: number[];
   embeddingModel: string;
   embeddingDimensions: number;

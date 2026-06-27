@@ -1,5 +1,5 @@
 import "server-only";
-import { Pinecone } from "@pinecone-database/pinecone";
+import { Pinecone, type RecordMetadata } from "@pinecone-database/pinecone";
 
 export type ChunkMetadata = Record<string, unknown> & {
   id?: string;
@@ -19,6 +19,7 @@ export type ChunkMetadata = Record<string, unknown> & {
 export type PineconeChunkMatch = {
   id?: string;
   score?: number;
+  fields?: ChunkMetadata;
   metadata?: ChunkMetadata;
 };
 
@@ -34,24 +35,27 @@ function requiredEnv(name: string) {
 
 // Initialize a Pinecone client with your API key
 const pc = new Pinecone({ apiKey: requiredEnv("PINECONE_API_KEY") });
-// Create an index for dense vectors with integrated embedding
+// Create an index for dense vectors with integrated embedding (skip if already exists)
 const indexName = requiredEnv("PINECONE_INDEX");
-await pc.createIndexForModel({
-  name: indexName,
-  cloud: "aws",
-  region: "us-east-1",
-  embed: {
-    model: "llama-text-embed-v2",
-    fieldMap: { text: "chunk_text" },
-  },
-  waitUntilReady: true,
-});
+const existingIndexes = await pc.listIndexes();
+if (!existingIndexes.indexes?.some((idx) => idx.name === indexName)) {
+  await pc.createIndexForModel({
+    name: indexName,
+    cloud: "aws",
+    region: "us-east-1",
+    embed: {
+      model: "llama-text-embed-v2",
+      fieldMap: { text: "chunk_text" },
+    },
+    waitUntilReady: true,
+  });
+}
 
 // Target the index
 const index = pc.index(indexName).namespace("example-namespace");
 
 export async function addDocuments(
-  docs: { text: string; chunk_text: string; [key: string]: any }[],
+  docs: ({ text: string; chunk_text: string } & RecordMetadata)[],
 ) {
   await index.upsertRecords(docs);
 }
@@ -59,14 +63,26 @@ export async function addDocuments(
 export async function querySimilarChunks(
   query: string,
   accessLevels: string[],
-  limit = 5,
+  limit = 10,
 ): Promise<PineconeChunkMatch[]> {
   // Search the index
   const results = await index.searchRecords({
     query: {
       topK: limit,
       inputs: { text: query },
+      filter: { accessLevel: { $in: accessLevels } },
     },
+    fields: [
+      "chunk_text",
+      "text",
+      "maskedText",
+      "documentId",
+      "documentTitle",
+      "title",
+      "chunkIndex",
+      "accessLevel",
+      "createdAt",
+    ],
   });
 
   // // Print the results

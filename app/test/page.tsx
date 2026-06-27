@@ -9,6 +9,7 @@ export default function FileToMarkdownUploader() {
   const [error, setError] = useState("");
 
   async function handleConvert() {
+    const MARKITDOWN_URL = process.env.NEXT_PUBLIC_MARKITDOWN_URL || "";
     if (!file) {
       setError("Please select a file first.");
       return;
@@ -22,7 +23,7 @@ export default function FileToMarkdownUploader() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch("http://127.0.0.1:8000/convert", {
+      const res = await fetch(`${MARKITDOWN_URL}/convert`, {
         method: "POST",
         body: formData,
       });

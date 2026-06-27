@@ -34,7 +34,7 @@ export default function SettingsPage() {
   const connections = health
     ? [
         { name: "Firestore", health: health.firestore, icon: Database },
-        { name: "Gemini AI", health: health.ai, icon: KeyRound },
+        { name: "Groq AI", health: health.ai, icon: KeyRound },
         { name: "Firebase Storage", health: health.storageBucket, icon: Cloud },
         { name: "Gmail connector", health: health.gmail, icon: Mail },
       ]
@@ -68,7 +68,7 @@ export default function SettingsPage() {
                       <p className="text-sm font-semibold">{name}</p>
                       <p className="mt-1 text-xs text-[#89928c]">{status.error ?? status.mode}</p>
                     </div>
-                    <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.08em] ${ok ? "bg-[#e8f5ef] text-[#197a5b]" : "bg-[#fff4dc] text-[#8a6511]"}`}>
+                    <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${ok ? "bg-[#e8f5ef] text-[#197a5b]" : "bg-[#fff4dc] text-[#8a6511]"}`}>
                       {ok ? <CheckCircle2 size={13} /> : <TriangleAlert size={13} />}
                       {ok ? "Connected" : "Setup needed"}
                     </span>
@@ -82,11 +82,11 @@ export default function SettingsPage() {
           <div className="rounded-2xl bg-[#0f3d2e] p-5 text-white">
             <ShieldCheck size={22} className="text-[#77d5b4]" />
             <h3 className="mt-4 text-sm font-semibold">Private by design</h3>
-            <p className="mt-2 text-xs leading-5 text-white/60">Firebase, Gemini, and Google OAuth credentials stay inside server route handlers.</p>
+            <p className="mt-2 text-xs leading-5 text-white/60">Firebase, Groq, Pinecone, and Google OAuth credentials stay inside server route handlers.</p>
           </div>
           <div className="rounded-2xl border border-[#e3e8e2] bg-white p-5">
             <h3 className="text-sm font-semibold">Server configuration</h3>
-            <code className="mt-3 block whitespace-pre-wrap rounded-xl bg-[#f5f7f4] p-3 text-[10px] leading-5 text-[#516059]">credentials.json<br />FIREBASE_PROJECT_ID<br />FIREBASE_CLIENT_EMAIL<br />FIREBASE_PRIVATE_KEY<br />FIREBASE_STORAGE_BUCKET<br />GEMINI_API_KEY<br />BRAIN_INBOX_EMAIL</code>
+            <code className="mt-3 block whitespace-pre-wrap rounded-xl bg-[#f5f7f4] p-3 text-[10px] leading-5 text-[#516059]">credentials.json<br />FIREBASE_PROJECT_ID<br />FIREBASE_CLIENT_EMAIL<br />FIREBASE_PRIVATE_KEY<br />FIREBASE_STORAGE_BUCKET<br />GROQ_API_KEY<br />PINECONE_API_KEY<br />PINECONE_INDEX<br />BRAIN_INBOX_EMAIL</code>
           </div>
         </aside>
       </div>

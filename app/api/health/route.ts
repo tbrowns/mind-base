@@ -5,14 +5,14 @@ export const runtime = "nodejs";
 
 export async function GET() {
   const firestore = await probeFirestore();
-  const geminiConfigured = Boolean(process.env.GEMINI_API_KEY);
+  const groqConfigured = Boolean(process.env.GROQ_API_KEY);
   const gmailStatus = gmailConfigurationStatus();
   return Response.json({
     firestore,
     ai: {
-      configured: geminiConfigured,
-      connected: geminiConfigured,
-      mode: geminiConfigured ? "Gemini AI configured" : "GEMINI_API_KEY missing",
+      configured: groqConfigured,
+      connected: groqConfigured,
+      mode: groqConfigured ? "Groq AI configured" : "GROQ_API_KEY missing",
     },
     storageBucket: {
       configured: Boolean(process.env.FIREBASE_STORAGE_BUCKET),

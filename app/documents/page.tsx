@@ -39,7 +39,7 @@ export default function DocumentsPage() {
       <PageHeader
         eyebrow="Knowledge library"
         title="Documents"
-        description="Manage the source material Kuzana Brain can search and cite."
+        description="Manage the source material Mindbase can search and cite."
         action={
           <Link
             href="/documents/new"
@@ -71,7 +71,7 @@ export default function DocumentsPage() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left">
             <thead>
-              <tr className="text-[10px] font-bold uppercase tracking-[.12em] text-[#929b95]">
+              <tr className="text-[10px] font-bold uppercase text-[#929b95]">
                 <th className="px-5 py-3">Document</th>
                 <th className="px-5 py-3">Access</th>
                 <th className="px-5 py-3">Chunks</th>

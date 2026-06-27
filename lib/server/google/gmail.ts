@@ -1,9 +1,36 @@
 import "server-only";
+import fs from "fs";
+import path from "path";
 import { type GmailMessage } from "@/lib/types";
 
 export type { GmailMessage };
 
+export const GMAIL_CREDENTIALS_PATH = path.join(process.cwd(), "credentials.json");
+export const GMAIL_TOKEN_PATH = path.join(process.cwd(), "token.json");
 export const GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
+
+type GmailPayloadPart = {
+  headers?: { name: string; value: string }[];
+  mimeType?: string;
+  body?: { data?: string };
+  parts?: GmailPayloadPart[];
+};
+
+export function gmailConfigurationStatus() {
+  const missing: string[] = [];
+  const hasCredentials = fs.existsSync(GMAIL_CREDENTIALS_PATH);
+  const hasToken = fs.existsSync(GMAIL_TOKEN_PATH);
+
+  if (!hasCredentials) {
+    missing.push("credentials.json");
+  }
+
+  return {
+    configured: hasCredentials,
+    authorized: hasToken,
+    missing,
+  };
+}
 
 /**
  * Fetch Gmail messages using a client-provided OAuth token
@@ -59,12 +86,7 @@ export async function fetchGmailMessagesWithToken(
         id: string;
         threadId: string;
         snippet: string;
-        payload?: {
-          headers?: { name: string; value: string }[];
-          mimeType?: string;
-          body?: { data?: string };
-          parts?: any[];
-        };
+        payload?: GmailPayloadPart;
       };
 
       const headers = messageData.payload?.headers || [];
@@ -104,7 +126,7 @@ function decodeBase64Url(value?: string | null): string {
   ).toString("utf8");
 }
 
-function extractPlainText(part: any): string {
+function extractPlainText(part?: GmailPayloadPart): string {
   if (part?.mimeType === "text/plain") {
     return decodeBase64Url(part?.body?.data);
   }
