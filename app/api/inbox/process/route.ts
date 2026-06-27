@@ -1,0 +1,2 @@
+import { processIngestionJob } from "@/lib/process-ingestion-job";
+export async function POST(request: Request) { try { const { jobId } = await request.json(); if (!jobId) return Response.json({ error: "Select an inbox item to process." }, { status: 400 }); return Response.json(await processIngestionJob(jobId)); } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Inbox processing failed." }, { status: 500 }); } }

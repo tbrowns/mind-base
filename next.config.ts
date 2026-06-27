@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: ["googleapis", "@google-cloud/local-auth"],
 };
 
 export default nextConfig;

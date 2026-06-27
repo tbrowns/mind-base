@@ -1,65 +1,28 @@
-import Image from "next/image";
+"use client";
+import Link from "next/link";
+import { ArrowRight, BrainCircuit, CalendarRange, Check, Clock3, FilePlus2, FileText, Inbox, Layers3, MessageSquareText, RefreshCw, Sparkles, Upload } from "@/components/icons";
+import { useCallback, useEffect, useState } from "react";
+import type { ChatRecord, DocumentRecord } from "@/lib/types";
+import { accessLabels } from "@/lib/types";
+import { Badge, Spinner } from "@/components/ui";
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+type Data = { documents: DocumentRecord[]; chats: ChatRecord[]; totals: { documents: number; chunks: number; questions: number } };
+type InboxData = { summary: { pending: number; automated: number; latestMeeting: { meetingTitle: string; meetingDate: string } | null } };
+export default function Dashboard() {
+  const [data, setData] = useState<Data>({ documents: [], chats: [], totals: { documents: 0, chunks: 0, questions: 0 } }); const [loading, setLoading] = useState(true); const [seeding, setSeeding] = useState(false); const [seeded, setSeeded] = useState(false);
+  const [inbox, setInbox] = useState<InboxData>({ summary: { pending: 0, automated: 0, latestMeeting: null } }); const [syncing, setSyncing] = useState(false); const [syncResult, setSyncResult] = useState("Not synced this session");
+  const load = useCallback(async () => { const response = await fetch("/api/documents", { cache: "no-store" }); setData(await response.json()); setLoading(false); }, []);
+  useEffect(() => { void Promise.all([fetch("/api/documents", { cache: "no-store" }).then((r) => r.json()), fetch("/api/inbox", { cache: "no-store" }).then((r) => r.json())]).then(([documents, inboxData]) => { setData(documents); setInbox(inboxData); setLoading(false); }); }, []);
+  async function seed() { setSeeding(true); const res = await fetch("/api/demo/seed", { method: "POST" }); if (res.ok) { setSeeded(true); await load(); } setSeeding(false); }
+  async function syncGmail() { setSyncing(true); const response = await fetch("/api/connectors/gmail/sync", { method: "POST" }); const result = await response.json(); setSyncResult(response.ok ? `${result.imported} imported · ${result.skipped} skipped · ${result.failed} failed` : result.error); if (response.ok) setInbox(await fetch("/api/inbox", { cache: "no-store" }).then((r) => r.json())); setSyncing(false); }
+  const last = data.documents[0]; const stats = [{ label: "Documents", value: data.totals.documents, icon: FileText, note: "in your knowledge base" }, { label: "Searchable chunks", value: data.totals.chunks, icon: Layers3, note: "indexed and ready" }, { label: "Questions asked", value: data.totals.questions, icon: MessageSquareText, note: "across this workspace" }];
+  return <div className="mx-auto max-w-[1500px] px-5 py-8 md:px-8 lg:px-10 lg:py-10">
+    <section className="relative overflow-hidden rounded-[28px] bg-[#0f3d2e] px-6 py-8 text-white shadow-[0_14px_35px_rgba(15,61,46,.12)] md:px-10 md:py-10"><div className="absolute -right-20 -top-32 size-80 rounded-full border border-white/10"/><div className="absolute -right-8 -top-16 size-56 rounded-full border border-white/10"/><div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between"><div><div className="mb-5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.18em] text-[#77d5b4]"><span className="size-1.5 rounded-full bg-[#f4b942]"/>Workspace overview</div><h1 className="max-w-2xl text-3xl font-semibold tracking-[-.04em] md:text-[44px] md:leading-[1.08]">Good morning. What should<br className="hidden sm:block"/> the team know today?</h1><p className="mt-4 max-w-xl text-sm leading-6 text-white/65">Ask Kuzana’s internal knowledge. Get grounded, cited answers in seconds.</p></div><div className="flex flex-wrap gap-3"><Link href="/documents/new" className="inline-flex items-center gap-2 rounded-xl border border-white/20 px-4 py-3 text-sm font-semibold hover:bg-white/10"><Upload size={17}/>Upload document</Link><Link href="/chat" className="inline-flex items-center gap-2 rounded-xl bg-[#f4b942] px-4 py-3 text-sm font-semibold text-[#23352e] shadow-sm hover:bg-[#f7c75e]"><BrainCircuit size={17}/>Ask Kuzana Brain<ArrowRight size={16}/></Link></div></div></section>
+    <div className="mt-6 grid gap-4 md:grid-cols-3">{stats.map(({ label, value, icon: Icon, note }, i) => <div key={label} style={{ animationDelay: `${i * 60}ms` }} className="animate-rise rounded-2xl border border-[#e3e8e2] bg-white p-5 shadow-[0_5px_20px_rgba(20,50,35,.035)]"><div className="flex items-start justify-between"><div><p className="text-xs font-medium text-[#7c867f]">{label}</p><p className="mt-2 text-3xl font-semibold tracking-tight">{loading ? "—" : value}</p></div><span className="grid size-10 place-items-center rounded-xl bg-[#edf6f1] text-[#197a5b]"><Icon size={19}/></span></div><p className="mt-4 flex items-center gap-1.5 text-[11px] text-[#919a94]"><span className="size-1.5 rounded-full bg-[#21a67a]"/>{note}</p></div>)}</div>
+    <section className="mt-6 rounded-2xl border border-[#e3e8e2] bg-white p-5"><div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-[#fff5d9] text-[#8a6511]"><Inbox size={19}/></span><div><h2 className="text-sm font-semibold">Brain Inbox automation</h2><p className="mt-1 text-xs text-[#89928c]">Gmail review queue and meeting knowledge intake</p></div></div><div className="grid flex-1 gap-3 sm:grid-cols-3 lg:max-w-2xl"><div className="rounded-xl bg-[#f7f9f6] px-4 py-3"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#909992]">Pending review</p><p className="mt-1 text-xl font-semibold">{inbox.summary.pending}</p></div><div className="rounded-xl bg-[#f7f9f6] px-4 py-3"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#909992]">Automated imports</p><p className="mt-1 text-xl font-semibold">{inbox.summary.automated}</p></div><div className="rounded-xl bg-[#f7f9f6] px-4 py-3"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#909992]">Latest meeting</p><p className="mt-1 truncate text-xs font-semibold">{inbox.summary.latestMeeting?.meetingTitle ?? "None yet"}</p></div></div><div className="lg:text-right"><button onClick={syncGmail} disabled={syncing} className="inline-flex items-center gap-2 rounded-xl border border-[#cfd8d1] px-4 py-2.5 text-xs font-semibold text-[#284438] disabled:opacity-60">{syncing ? <Spinner size={15}/> : <RefreshCw size={15}/>}Sync Gmail Inbox</button><p className="mt-2 max-w-[240px] text-[10px] text-[#8d9690]">{syncResult}</p></div></div><div className="mt-4 flex flex-wrap gap-3 border-t border-[#edf0ec] pt-4"><Link href="/inbox" className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#197a5b]">Open Brain Inbox <ArrowRight size={13}/></Link><Link href="/meetings/import" className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#197a5b]"><CalendarRange size={13}/>Import meeting notes</Link></div></section>
+    <div className="mt-6 grid gap-6 xl:grid-cols-[1.55fr_.85fr]">
+      <section className="rounded-2xl border border-[#e3e8e2] bg-white"><div className="flex items-center justify-between border-b border-[#edf0ec] px-5 py-4"><div><h2 className="text-sm font-semibold">Recent documents</h2><p className="mt-0.5 text-xs text-[#89928c]">The latest additions to your brain</p></div><Link href="/documents" className="text-xs font-semibold text-[#197a5b] hover:underline">View all</Link></div><div className="divide-y divide-[#edf0ec]">{data.documents.slice(0, 3).map((doc) => <div key={doc.id} className="flex items-center gap-4 px-5 py-4"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#f0f5f1] text-[#527060]"><FileText size={18}/></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{doc.title}</p><p className="mt-1 text-xs text-[#8a948e]">{doc.chunkCount} chunks · {new Date(doc.uploadedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</p></div><Badge>{accessLabels[doc.accessLevel]}</Badge></div>)}{!data.documents.length && !loading && <div className="px-5 py-10 text-center"><FilePlus2 className="mx-auto text-[#a3ada7]"/><p className="mt-3 text-sm font-medium">No documents yet</p><p className="mt-1 text-xs text-[#8a948e]">Load the demo guide to get started.</p></div>}</div></section>
+      <aside className="rounded-2xl border border-[#e3e8e2] bg-white p-5"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#fff5d9] text-[#a47713]"><Sparkles size={18}/></span><div><h2 className="text-sm font-semibold">Demo ready in one click</h2><p className="text-xs text-[#89928c]">Seed Kuzana’s bounty guide</p></div></div><div className="my-5 h-px bg-[#edf0ec]"/><ul className="space-y-3 text-xs text-[#68736c]"><li className="flex gap-2"><Check size={15} className="text-[#21a67a]"/>Rules, deadlines and deliverables</li><li className="flex gap-2"><Check size={15} className="text-[#21a67a]"/>Embedded and ready to search</li><li className="flex gap-2"><Check size={15} className="text-[#21a67a]"/>Safe to reload without duplicates</li></ul><button onClick={seed} disabled={seeding || seeded} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[#0f3d2e] px-4 py-3 text-sm font-semibold text-white hover:bg-[#174f3d] disabled:opacity-70">{seeding ? <><Spinner/>Building knowledge base…</> : seeded ? <><Check size={17}/>Demo document ready</> : <><Sparkles size={17}/>Load Demo Kuzana Document</>}</button>{last && <p className="mt-3 flex items-center justify-center gap-1.5 text-[10px] text-[#929b95]"><Clock3 size={12}/>Latest: {last.title}</p>}</aside>
     </div>
-  );
+  </div>;
 }
