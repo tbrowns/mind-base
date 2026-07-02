@@ -160,25 +160,6 @@ export default function Dashboard() {
               </Link>
             </div>
           </div>
-          <div className="rounded-[24px] border border-white/14 bg-white/10 p-4 backdrop-blur">
-            {[
-              ["Provider", "Groq API"],
-              ["Retrieval", "Relevance gated"],
-              ["Memory", "5 chat turns"],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                className="flex items-center justify-between border-b border-white/10 py-3 last:border-0"
-              >
-                <span className="text-[11px] font-bold uppercase text-white/50">
-                  {label}
-                </span>
-                <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-[#0a3f37]">
-                  {value}
-                </span>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 
@@ -228,7 +209,9 @@ export default function Dashboard() {
               <p className="text-[10px] font-bold uppercase text-[#87978f]">
                 Pending
               </p>
-              <p className="mt-1 text-2xl font-black">{inbox.summary.pending}</p>
+              <p className="mt-1 text-2xl font-black">
+                {inbox.summary.pending}
+              </p>
             </div>
             <div>
               <p className="text-[10px] font-bold uppercase text-[#87978f]">

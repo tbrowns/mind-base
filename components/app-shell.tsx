@@ -9,7 +9,6 @@ import {
   Inbox,
   LayoutDashboard,
   Menu,
-  Settings,
   X,
 } from "@/components/icons";
 import { useState } from "react";
@@ -24,7 +23,6 @@ const nav = [
   { href: "/meetings/import", label: "Meetings", icon: CalendarRange },
   { href: "/documents", label: "Library", icon: FileText },
   { href: "/chat", label: "Ask Mindbase", icon: BrainCircuit },
-  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -58,7 +56,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <nav className="mt-9 space-y-1.5">
           {nav.map((item) => {
             const active =
-              item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              item.href === "/"
+                ? pathname === "/"
+                : pathname.startsWith(item.href);
             const Icon = item.icon;
 
             return (
@@ -86,20 +86,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
-
-        <div className="mt-auto overflow-hidden rounded-3xl border border-[#bfe8dc] bg-[#103f38] p-4 text-white shadow-[0_18px_40px_rgba(10,63,55,.18)]">
-          <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-[#91f2d8]">
-            <span className="size-1.5 rounded-full bg-[#ff6b57]" />
-            Live workspace
-          </div>
-          <p className="mt-4 text-sm font-semibold">Answers stay grounded.</p>
-          <p className="mt-1 text-xs leading-5 text-white/62">
-            Groq writes the answer. Your indexed documents provide the facts.
-          </p>
-        </div>
-        <p className="mt-5 px-2 text-[10px] font-semibold uppercase text-[#91a39b]">
-          Internal workspace
-        </p>
       </aside>
 
       <div className="lg:pl-[264px]">

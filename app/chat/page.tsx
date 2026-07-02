@@ -79,7 +79,10 @@ export default function ChatPage() {
       if (!response.ok) throw new Error(data.error);
 
       setMessages((items) => [...items, data]);
-      setRecent((items) => [data, ...items.filter((item) => item.id !== data.id)]);
+      setRecent((items) => [
+        data,
+        ...items.filter((item) => item.id !== data.id),
+      ]);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Could not answer that question.",
@@ -132,11 +135,6 @@ export default function ChatPage() {
                 Grounded answers from relevance-checked chunks
               </p>
             </div>
-          </div>
-          <div className="hidden flex-wrap gap-2 md:flex">
-            <Badge tone="gray">Groq</Badge>
-            <Badge tone="green">5-turn memory</Badge>
-            <Badge tone="gold">Cited sources</Badge>
           </div>
         </header>
 
