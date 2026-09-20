@@ -12,117 +12,57 @@ import {
   Layers3,
   MessageSquareText,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
   Upload,
 } from "@/components/icons";
 import { useCallback, useEffect, useState } from "react";
 import type { ChatRecord, DocumentRecord } from "@/lib/types";
-import { accessLabels } from "@/lib/types";
+import { accessLabels, memberRoleLabels } from "@/lib/types";
 import { Badge, Spinner } from "@/components/ui";
+import { useSession, type WorkspaceSummary } from "@/components/session-context";
+
+/** Pull the server `{error}` text out of a failed response, with a fallback. */
+async function readError(response: Response, fallback: string) {
+  try {
+    const data = (await response.json()) as { error?: unknown };
+    if (typeof data.error === "string" && data.error.trim()) return data.error;
+  } catch {
+    // Non-JSON body (proxy page, empty response); fall through.
+  }
+  return fallback;
+}
+
+function messageOf(err: unknown, fallback: string) {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 type Data = {
   documents: DocumentRecord[];
   chats: ChatRecord[];
   totals: { documents: number; chunks: number; questions: number };
 };
-type InboxData = {
-  summary: {
-    pending: number;
-    automated: number;
-    latestMeeting: { meetingTitle: string; meetingDate: string } | null;
-  };
+type InboxSummary = {
+  pending: number;
+  automated: number;
+  latestMeeting: { meetingTitle: string; meetingDate: string } | null;
+};
+
+const emptyData: Data = {
+  documents: [],
+  chats: [],
+  totals: { documents: 0, chunks: 0, questions: 0 },
+};
+const emptyInbox: InboxSummary = {
+  pending: 0,
+  automated: 0,
+  latestMeeting: null,
 };
 
 export default function Dashboard() {
-  const [data, setData] = useState<Data>({
-    documents: [],
-    chats: [],
-    totals: { documents: 0, chunks: 0, questions: 0 },
-  });
-  const [loading, setLoading] = useState(true);
-  const [seeding, setSeeding] = useState(false);
-  const [seeded, setSeeded] = useState(false);
-  const [inbox, setInbox] = useState<InboxData>({
-    summary: { pending: 0, automated: 0, latestMeeting: null },
-  });
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState("Not synced this session");
-
-  const load = useCallback(async () => {
-    const response = await fetch("/api/documents", { cache: "no-store" });
-    setData(await response.json());
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    void Promise.all([
-      fetch("/api/documents", { cache: "no-store" }).then((response) =>
-        response.json(),
-      ),
-      fetch("/api/inbox", { cache: "no-store" }).then((response) =>
-        response.json(),
-      ),
-    ]).then(([documents, inboxData]) => {
-      setData(documents);
-      setInbox(inboxData);
-      setLoading(false);
-    });
-  }, []);
-
-  async function seed() {
-    setSeeding(true);
-    const response = await fetch("/api/demo/seed", { method: "POST" });
-
-    if (response.ok) {
-      setSeeded(true);
-      await load();
-    }
-
-    setSeeding(false);
-  }
-
-  async function syncGmail() {
-    setSyncing(true);
-    const response = await fetch("/api/connectors/gmail/sync", {
-      method: "POST",
-    });
-    const result = await response.json();
-    setSyncResult(
-      response.ok
-        ? `${result.imported} imported / ${result.skipped} skipped / ${result.failed} failed`
-        : result.error,
-    );
-
-    if (response.ok) {
-      setInbox(
-        await fetch("/api/inbox", { cache: "no-store" }).then((r) => r.json()),
-      );
-    }
-
-    setSyncing(false);
-  }
-
-  const last = data.documents[0];
-  const stats = [
-    {
-      label: "Documents",
-      value: data.totals.documents,
-      icon: FileText,
-      note: "ready to cite",
-    },
-    {
-      label: "Searchable chunks",
-      value: data.totals.chunks,
-      icon: Layers3,
-      note: "screened before Groq",
-    },
-    {
-      label: "Questions asked",
-      value: data.totals.questions,
-      icon: MessageSquareText,
-      note: "last 5 remembered",
-    },
-  ];
+  const { activeWorkspace } = useSession();
+  const canAdminister =
+    activeWorkspace?.role === "admin" || activeWorkspace?.role === "owner";
 
   return (
     <div className="mx-auto max-w-[1500px] px-5 py-8 md:px-8 lg:px-10 lg:py-10">
@@ -160,8 +100,195 @@ export default function Dashboard() {
               </Link>
             </div>
           </div>
+
+          {/*
+            Which workspace this deck is showing. The rights that come with it
+            are resolved server-side from membership, so this is a label, not
+            a control: the switcher lives in the app header.
+          */}
+          <div className="rounded-2xl border border-white/14 bg-white/8 p-5">
+            <p className="text-[10px] font-bold uppercase text-[#a8ffe7]">
+              Active workspace
+            </p>
+            {activeWorkspace ? (
+              <>
+                <p className="mt-2 truncate text-lg font-black">
+                  {activeWorkspace.name}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
+                  <span className="rounded-full border border-white/14 bg-white/10 px-2.5 py-1">
+                    {activeWorkspace.type === "personal"
+                      ? "Personal workspace"
+                      : "Organization workspace"}
+                  </span>
+                  <span className="rounded-full border border-white/14 bg-white/10 px-2.5 py-1">
+                    {memberRoleLabels[activeWorkspace.role]}
+                  </span>
+                </div>
+                {canAdminister && (
+                  <Link
+                    href="/admin"
+                    className="mt-4 inline-flex items-center gap-1.5 text-xs font-black text-[#9dffe5] hover:text-white"
+                  >
+                    <ShieldCheck size={14} />
+                    Open administration
+                    <ArrowRight size={13} />
+                  </Link>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 text-sm leading-6 text-white/70">
+                No workspace selected yet. Pick one from the header to load its
+                knowledge base.
+              </p>
+            )}
+          </div>
         </div>
       </section>
+
+      {activeWorkspace ? (
+        // Keyed on the workspace so switching resets every count, the seeded
+        // flag and any stale error, and the load effect runs again for the
+        // new workspace.
+        <Deck key={activeWorkspace.id} workspace={activeWorkspace} />
+      ) : (
+        <div className="soft-panel mt-6 rounded-[24px] px-6 py-16 text-center">
+          <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[#e9f2ee] text-[#0a3f37]">
+            <Layers3 size={20} />
+          </span>
+          <h2 className="mt-5 text-lg font-black text-[#101b18]">
+            No workspace selected
+          </h2>
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#60756c]">
+            Pick a workspace from the header to see its documents, inbox and
+            recent activity.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Deck({ workspace }: { workspace: WorkspaceSummary }) {
+  const { apiFetch } = useSession();
+  const [data, setData] = useState<Data>(emptyData);
+  const [inbox, setInbox] = useState<InboxSummary>(emptyInbox);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [seeding, setSeeding] = useState(false);
+  const [seeded, setSeeded] = useState(false);
+
+  const loadDocuments = useCallback(async (): Promise<Data> => {
+    const response = await apiFetch("/api/documents");
+    if (!response.ok) {
+      throw new Error(
+        await readError(response, "Could not load the knowledge base."),
+      );
+    }
+    const body = (await response.json()) as Partial<Data>;
+    return {
+      documents: body.documents ?? [],
+      chats: body.chats ?? [],
+      totals: body.totals ?? emptyData.totals,
+    };
+  }, [apiFetch]);
+
+  const loadInbox = useCallback(async (): Promise<InboxSummary> => {
+    const response = await apiFetch("/api/inbox");
+    if (!response.ok) {
+      throw new Error(
+        await readError(response, "Could not load the inbox summary."),
+      );
+    }
+    const body = (await response.json()) as {
+      summary?: Partial<InboxSummary>;
+    };
+    return {
+      pending: body.summary?.pending ?? 0,
+      automated: body.summary?.automated ?? 0,
+      latestMeeting: body.summary?.latestMeeting ?? null,
+    };
+  }, [apiFetch]);
+
+  // `loading` and `error` start fresh here because the parent remounts this
+  // component per workspace, so the effect only has to apply results.
+  useEffect(() => {
+    let cancelled = false;
+
+    // The two feeds are independent: a failing inbox should not blank the
+    // document counts, so each result is applied on its own.
+    void Promise.allSettled([loadDocuments(), loadInbox()]).then(
+      ([documents, inboxSummary]) => {
+        if (cancelled) return;
+        if (documents.status === "fulfilled") setData(documents.value);
+        if (inboxSummary.status === "fulfilled") setInbox(inboxSummary.value);
+        const failure = [documents, inboxSummary].find(
+          (result): result is PromiseRejectedResult =>
+            result.status === "rejected",
+        );
+        if (failure) {
+          setError(messageOf(failure.reason, "Could not load the dashboard."));
+        }
+        setLoading(false);
+      },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadDocuments, loadInbox, workspace.id]);
+
+  async function seed() {
+    setSeeding(true);
+    setError("");
+    try {
+      const response = await apiFetch("/api/demo/seed", { method: "POST" });
+      if (!response.ok) {
+        throw new Error(
+          await readError(response, "Could not load the demo document."),
+        );
+      }
+      setSeeded(true);
+      setData(await loadDocuments());
+    } catch (err) {
+      setError(messageOf(err, "Could not load the demo document."));
+    } finally {
+      setSeeding(false);
+    }
+  }
+
+  const last = data.documents[0];
+  const stats = [
+    {
+      label: "Documents",
+      value: data.totals.documents,
+      icon: FileText,
+      note: "ready to cite",
+    },
+    {
+      label: "Searchable chunks",
+      value: data.totals.chunks,
+      icon: Layers3,
+      note: "screened before Groq",
+    },
+    {
+      label: "Questions asked",
+      value: data.totals.questions,
+      icon: MessageSquareText,
+      note: "last 5 remembered",
+    },
+  ];
+
+  return (
+    <>
+      {error && (
+        <div
+          role="alert"
+          className="mt-6 rounded-2xl border border-[#f3cfc9] bg-[#fff0ed] px-4 py-3 text-sm text-[#b53d31]"
+        >
+          {error}
+        </div>
+      )}
 
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         {stats.map(({ label, value, icon: Icon, note }, index) => (
@@ -210,7 +337,7 @@ export default function Dashboard() {
                 Pending
               </p>
               <p className="mt-1 text-2xl font-black">
-                {inbox.summary.pending}
+                {loading ? "-" : inbox.pending}
               </p>
             </div>
             <div>
@@ -218,7 +345,7 @@ export default function Dashboard() {
                 Automated
               </p>
               <p className="mt-1 text-2xl font-black">
-                {inbox.summary.automated}
+                {loading ? "-" : inbox.automated}
               </p>
             </div>
             <div>
@@ -226,20 +353,26 @@ export default function Dashboard() {
                 Latest meeting
               </p>
               <p className="mt-2 truncate text-xs font-bold">
-                {inbox.summary.latestMeeting?.meetingTitle ?? "None yet"}
+                {inbox.latestMeeting?.meetingTitle ?? "None yet"}
               </p>
             </div>
           </div>
+          {/*
+            Syncing needs a Google access token from the browser's OAuth
+            client, which the inbox page owns. Sending the request from here
+            without one is a guaranteed 400, so this hands off instead.
+          */}
           <div className="lg:text-right">
-            <button
-              onClick={syncGmail}
-              disabled={syncing}
-              className="inline-flex items-center gap-2 rounded-2xl border border-[#bfd8cf] bg-white px-4 py-3 text-xs font-black text-[#244940] disabled:opacity-60"
+            <Link
+              href="/inbox"
+              className="inline-flex items-center gap-2 rounded-2xl border border-[#bfd8cf] bg-white px-4 py-3 text-xs font-black text-[#244940] hover:bg-[#f4faf8]"
             >
-              {syncing ? <Spinner size={15} /> : <RefreshCw size={15} />}
+              <RefreshCw size={15} />
               Sync Gmail
-            </button>
-            <p className="mt-2 text-[10px] text-[#7c8d85]">{syncResult}</p>
+            </Link>
+            <p className="mt-2 text-[10px] text-[#7c8d85]">
+              Authorize Gmail in the inbox to sync.
+            </p>
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-3 border-t border-[#dcebe5] pt-4">
@@ -265,7 +398,7 @@ export default function Dashboard() {
             <div>
               <h2 className="text-sm font-black">Recent sources</h2>
               <p className="mt-0.5 text-xs text-[#71837b]">
-                The newest additions to your knowledge base.
+                The newest additions to {workspace.name}.
               </p>
             </div>
             <Link
@@ -276,6 +409,11 @@ export default function Dashboard() {
             </Link>
           </div>
           <div className="divide-y divide-[#dcebe5]">
+            {loading && (
+              <div className="grid place-items-center px-5 py-10 text-[#0aa37f]">
+                <Spinner size={22} />
+              </div>
+            )}
             {data.documents.slice(0, 3).map((doc) => (
               <div key={doc.id} className="flex items-center gap-4 px-5 py-4">
                 <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-[#e0f5ee] text-[#08735f]">
@@ -361,6 +499,6 @@ export default function Dashboard() {
           )}
         </aside>
       </div>
-    </div>
+    </>
   );
 }
