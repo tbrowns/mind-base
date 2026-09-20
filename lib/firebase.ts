@@ -1,7 +1,19 @@
 import "server-only";
-import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth, type Auth } from "firebase-admin/auth";
-import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import type { App } from "firebase-admin/app";
+import type { Auth } from "firebase-admin/auth";
+import type { Firestore } from "firebase-admin/firestore";
+
+/*
+ * firebase-admin is loaded on demand, never at module scope. It is a large
+ * dependency graph, and the moment it is imported statically every consumer of
+ * this file pays for it - including `lib/workspaces`, which in local-storage
+ * mode does not touch Firebase at all. That import alone was enough to time
+ * out the workspace test suite's setup hook and it lengthens cold starts on
+ * routes that only read the JSON store.
+ *
+ * These are all behind async functions already, so deferring the import costs
+ * nothing at the call sites.
+ */
 
 const FIREBASE_KEYS = [
   "FIREBASE_PROJECT_ID",
@@ -57,7 +69,8 @@ export async function getAdminDb(): Promise<Firestore | null> {
   }
   if (cachedDb) return cachedDb;
   try {
-    cachedDb = getFirestore(adminApp());
+    const { getFirestore } = await import("firebase-admin/firestore");
+    cachedDb = getFirestore(await adminApp());
     return cachedDb;
   } catch (error) {
     throw new Error(
@@ -67,7 +80,8 @@ export async function getAdminDb(): Promise<Firestore | null> {
 }
 
 /** One initialised admin app, shared by Firestore and Auth. */
-function adminApp() {
+async function adminApp(): Promise<App> {
+  const { cert, getApps, initializeApp } = await import("firebase-admin/app");
   return (
     getApps()[0] ??
     initializeApp({
@@ -93,7 +107,8 @@ export async function getAdminAuth(): Promise<Auth> {
       `Authentication is not configured. Missing server environment variables: ${missing.join(", ")}.`,
     );
   }
-  return getAuth(adminApp());
+  const { getAuth } = await import("firebase-admin/auth");
+  return getAuth(await adminApp());
 }
 
 export async function probeFirestore() {
