@@ -1,6 +1,7 @@
 import { querySimilarChunks } from "./vectorstore";
 import type { ChunkMetadata, PineconeChunkMatch } from "./vectorstore";
-import type { AccessLevel, ChunkRecord } from "./types";
+import { canRetrieveChunk } from "./authz";
+import type { AccessLevel, AccessScope, ChunkRecord } from "./types";
 
 const DEFAULT_ACCESS_LEVEL = "all-team";
 const ACCESS_LEVELS: AccessLevel[] = [
@@ -187,6 +188,11 @@ function toChunkRecord(match: PineconeChunkMatch): ChunkRecord | null {
       asString(fields.id) ||
       asString(match.id) ||
       `${documentId || "document"}-${chunkIndex}`,
+    workspaceId: asString(fields.workspaceId),
+    ownerId: asString(fields.ownerId),
+    // Absent visibility means a pre-tenancy record: treat as private so it
+    // cannot surface to anyone but a matching owner id (i.e. nobody).
+    visibility: asString(fields.visibility) === "shared" ? "shared" : "private",
     documentId,
     documentTitle:
       asString(fields.documentTitle) ||
@@ -205,12 +211,21 @@ function toChunkRecord(match: PineconeChunkMatch): ChunkRecord | null {
   };
 }
 
+/**
+ * Retrieve chunks the caller is entitled to see.
+ *
+ * Three independent gates, deliberately redundant: the Pinecone namespace
+ * (workspace), the Pinecone metadata filter (visibility and tier), and
+ * canRetrieveChunk below. A bug in any one of them is caught by the others,
+ * and the last gate is the same pure function the test suite exercises.
+ */
 export async function searchDocuments(
+  scope: AccessScope,
   question: string,
-  accessLevels: string[],
   limit = 10,
 ): Promise<ChunkRecord[]> {
   const normalizedQuestion = question.trim();
+  const accessLevels = scope.accessLevels;
 
   if (!normalizedQuestion || limit <= 0 || !accessLevels.length) {
     return [];
@@ -218,16 +233,25 @@ export async function searchDocuments(
 
   try {
     const candidateLimit = Math.min(Math.max(limit * 4, 12), 40);
-    const results = await querySimilarChunks(
-      normalizedQuestion,
+    const results = await querySimilarChunks({
+      workspaceId: scope.workspaceId,
+      userId: scope.userId,
+      query: normalizedQuestion,
       accessLevels,
-      candidateLimit,
-    );
+      limit: candidateLimit,
+    });
 
     return results
       .map(toChunkRecord)
       .filter((chunk): chunk is ChunkRecord => Boolean(chunk))
-      .filter((chunk) => accessLevels.includes(chunk.accessLevel))
+      .map((chunk) => ({
+        ...chunk,
+        // Pinecone namespaces are per workspace, so a hit is by construction
+        // from this one; stamp it so the authz check has a complete record
+        // even when the metadata predates the field.
+        workspaceId: chunk.workspaceId || scope.workspaceId,
+      }))
+      .filter((chunk) => canRetrieveChunk(scope, chunk))
       .map((chunk) => {
         const lexicalScore = lexicalRelevance(normalizedQuestion, chunk);
         const vectorScore = vectorRelevance(chunk.score);

@@ -1,13 +1,23 @@
 import { demoText } from "@/lib/demo";
 import { ingestDocument } from "@/lib/ingest";
 import { listDocuments } from "@/lib/store";
-export async function POST() {
+import { authorize, errorResponse, workspaceIdFrom } from "@/lib/auth";
+
+/** Seeds the demo document into the caller's own workspace. */
+export async function POST(request: Request) {
   try {
-    const existing = (await listDocuments()).find(
+    const { scope, user } = await authorize(request, workspaceIdFrom(request));
+
+    const existing = (await listDocuments(scope.workspaceId)).find(
       (d) => d.title === "Mindbase Demo Guide",
     );
     if (existing) return Response.json({ document: existing, existing: true });
+
     const document = await ingestDocument({
+      workspaceId: scope.workspaceId,
+      ownerId: scope.userId,
+      ownerEmail: user.email,
+      visibility: "shared",
       title: "Mindbase Demo Guide",
       description:
         "2026 MiniHack rules, deliverables, dates, and bounty guidance.",
@@ -18,14 +28,6 @@ export async function POST() {
     });
     return Response.json({ document }, { status: 201 });
   } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not load demo document.",
-      },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }

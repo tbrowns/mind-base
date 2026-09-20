@@ -6,11 +6,19 @@ import {
 } from "@/lib/store";
 import type { EmailImport, IngestionJob } from "@/lib/types";
 import { maskSensitiveData } from "@/lib/masking";
+import { authorize, errorResponse, workspaceIdFrom } from "@/lib/auth";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { accessToken?: string };
+    const body = (await request.json()) as {
+      accessToken?: string;
+      workspaceId?: string;
+    };
+    const { scope, user } = await authorize(
+      request,
+      workspaceIdFrom(request, body),
+    );
     const accessToken = body.accessToken;
 
     if (!accessToken) {
@@ -42,12 +50,20 @@ export async function POST(request: Request) {
       const maskedText = maskSensitiveData(message.text);
       const job: IngestionJob = {
         id: jobId,
+        workspaceId: scope.workspaceId,
+        ownerId: scope.userId,
+        ownerEmail: user.email,
+        // Mail is imported privately by default: an inbox sync should not
+        // publish someone's correspondence to their colleagues by accident.
+        visibility: "private",
         sourceType: "gmail",
         status: "needs_review",
         title: message.subject,
         rawText: maskedText,
         rawTextPreview: maskedText.slice(0, 220),
-        accessLevel: "management",
+        accessLevel: scope.accessLevels.includes("management")
+          ? "management"
+          : "all-team",
         metadata: {
           gmailMessageId: message.messageId,
           threadId: message.threadId,
@@ -79,9 +95,7 @@ export async function POST(request: Request) {
     }
     return Response.json({ found: messages.length, imported, skipped, failed });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Gmail sync failed." },
-      { status: 500 },
-    );
+    // Shared handler so an auth failure here returns 401 rather than 500.
+    return errorResponse(error);
   }
 }
