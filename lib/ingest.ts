@@ -1,9 +1,14 @@
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { addDocuments } from "./vectorstore";
 import { saveDocument } from "./store";
-import type { AccessLevel, DocumentRecord } from "./types";
+import type { AccessLevel, DocVisibility, DocumentRecord } from "./types";
 
 export async function ingestDocument(input: {
+  /** Tenancy is required, not optional: an untenanted document is unreachable. */
+  workspaceId: string;
+  ownerId: string;
+  ownerEmail: string;
+  visibility: DocVisibility;
   title: string;
   description?: string;
   text: string;
@@ -37,6 +42,9 @@ export async function ingestDocument(input: {
     documentId: id,
     documentTitle: input.title.trim(),
     accessLevel: input.accessLevel,
+    workspaceId: input.workspaceId,
+    ownerId: input.ownerId,
+    visibility: input.visibility,
     source: input.fileName || "manual",
     sourceType: input.sourceType || "manual",
     chunkIndex: i,
@@ -45,11 +53,15 @@ export async function ingestDocument(input: {
   }));
 
   // Add documents to Pinecone vector store
-  await addDocuments(docs);
+  await addDocuments(input.workspaceId, docs);
 
   // Create document record for metadata storage
   const document: DocumentRecord = {
     id,
+    workspaceId: input.workspaceId,
+    ownerId: input.ownerId,
+    ownerEmail: input.ownerEmail,
+    visibility: input.visibility,
     title: input.title.trim(),
     description: input.description?.trim() || "",
     fileName: input.fileName,

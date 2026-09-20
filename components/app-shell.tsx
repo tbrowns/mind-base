@@ -9,13 +9,15 @@ import {
   Inbox,
   LayoutDashboard,
   Menu,
+  ShieldCheck,
   X,
 } from "@/components/icons";
 import { useState } from "react";
 import { Logo } from "./logo";
-import { useRole } from "./role-context";
-import type { ViewerRole } from "@/lib/types";
-import { roleLabels } from "@/lib/types";
+import { Spinner } from "./ui";
+import { useSession } from "./session-context";
+import { SignInPanel } from "./sign-in-panel";
+import { NotificationsBell } from "./notifications-bell";
 
 const nav = [
   { href: "/", label: "Command Deck", icon: LayoutDashboard },
@@ -27,8 +29,36 @@ const nav = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { role, setRole } = useRole();
+  const {
+    user,
+    loading,
+    workspaces,
+    activeWorkspace,
+    setActiveWorkspaceId,
+    signOut,
+  } = useSession();
   const [open, setOpen] = useState(false);
+
+  if (loading) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#eef7f4] text-[#0aa37f]">
+        <Spinner size={26} />
+      </div>
+    );
+  }
+
+  // There is no anonymous view: the whole app is somebody's private knowledge.
+  if (!user) return <SignInPanel />;
+
+  const canAdminister =
+    activeWorkspace?.role === "admin" || activeWorkspace?.role === "owner";
+
+  const items = [
+    ...nav,
+    ...(canAdminister
+      ? [{ href: "/admin", label: "Administration", icon: ShieldCheck }]
+      : []),
+  ];
 
   return (
     <div className="min-h-screen bg-[#eef7f4] text-[#101b18]">
@@ -54,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="mt-9 space-y-1.5">
-          {nav.map((item) => {
+          {items.map((item) => {
             const active =
               item.href === "/"
                 ? pathname === "/"
@@ -86,6 +116,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+
+        <div className="mt-auto space-y-2 border-t border-[#e0efe9] pt-4">
+          <p className="px-2 text-[12px] font-bold text-[#244039]">
+            {user.displayName || user.email}
+          </p>
+          <Link
+            href="/workspaces"
+            onClick={() => setOpen(false)}
+            className="block px-2 text-[12px] font-bold text-[#0aa37f] hover:underline"
+          >
+            Workspaces
+          </Link>
+          <button
+            onClick={() => void signOut()}
+            className="px-2 text-[12px] font-bold text-[#8a9b94] hover:text-[#b53d31]"
+          >
+            Sign out
+          </button>
+        </div>
       </aside>
 
       <div className="lg:pl-[264px]">
@@ -103,22 +152,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               Mindbase control room
             </p>
           </div>
-          <label className="relative ml-auto">
-            <span className="sr-only">Viewing as</span>
+
+          {/*
+            Replaces the old "Viewing as" role picker. That control let the
+            client choose its own clearance, which the server then believed.
+            This one only chooses which workspace to look at; the rights that
+            come with it are resolved server-side from membership.
+          */}
+          <div className="ml-auto flex items-center">
+            <NotificationsBell />
+          </div>
+          <label className="relative ml-3">
+            <span className="sr-only">Workspace</span>
             <select
-              value={role}
-              onChange={(event) => setRole(event.target.value as ViewerRole)}
+              value={activeWorkspace?.id ?? ""}
+              onChange={(event) => setActiveWorkspaceId(event.target.value)}
               className="appearance-none rounded-full border border-[#cfe1da] bg-white py-2.5 pl-4 pr-9 text-xs font-bold text-[#244039] shadow-sm outline-none focus:border-[#0aa37f]"
             >
-              <option value="team-member">
-                Viewing as: {roleLabels["team-member"]}
-              </option>
-              <option value="management">
-                Viewing as: {roleLabels.management}
-              </option>
-              <option value="management-investees">
-                Viewing as: {roleLabels["management-investees"]}
-              </option>
+              {workspaces.length === 0 && <option value="">No workspace</option>}
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                  {workspace.type === "personal" ? " (personal)" : ""}
+                </option>
+              ))}
             </select>
             <ChevronDown
               size={13}

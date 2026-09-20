@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
-import { RoleProvider } from "@/components/role-context";
+import { SessionProvider } from "@/components/session-context";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,9 +22,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body>
-        <RoleProvider>
+        <SessionProvider>
           <AppShell>{children}</AppShell>
-        </RoleProvider>
+        </SessionProvider>
       </body>
     </html>
   );

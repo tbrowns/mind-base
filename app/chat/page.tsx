@@ -10,7 +10,10 @@ import {
   X,
 } from "@/components/icons";
 import { useEffect, useRef, useState } from "react";
-import { useRole } from "@/components/role-context";
+import {
+  useSession,
+  type WorkspaceSummary,
+} from "@/components/session-context";
 import { Badge, Spinner } from "@/components/ui";
 import type { ChatRecord, Source } from "@/lib/types";
 import { accessLabels } from "@/lib/types";
@@ -27,8 +30,49 @@ function relevanceLabel(score: number) {
   return `${Math.round(Math.max(0, Math.min(1, score)) * 100)}% relevance`;
 }
 
+/** Pull the server's `{error}` text out of a failed response, with a fallback. */
+async function readError(response: Response, fallback: string) {
+  try {
+    const data = (await response.json()) as { error?: unknown };
+    if (typeof data.error === "string" && data.error.trim()) return data.error;
+  } catch {
+    // Non-JSON body (proxy page, empty response); fall through.
+  }
+  return fallback;
+}
+
 export default function ChatPage() {
-  const { role } = useRole();
+  const { activeWorkspace } = useSession();
+
+  if (!activeWorkspace) {
+    return (
+      <div className="flex h-[calc(100vh-72px)] items-center justify-center bg-[#eef7f4]/70 px-4">
+        <div className="max-w-sm rounded-3xl border border-[#d9e9e2] bg-white/88 p-8 text-center shadow-sm">
+          <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[#e9f2ee] text-[#0a3f37]">
+            <BrainCircuit size={20} />
+          </span>
+          <h2 className="mt-5 text-lg font-black text-[#101b18]">
+            No workspace selected
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-[#60756c]">
+            Pick a workspace from the sidebar to start asking questions about
+            its knowledge base.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Keying on the workspace id remounts the conversation when the user
+  // switches workspace: messages, history and the open source drawer all reset
+  // and the history reload runs again, without setState-in-effect resets.
+  return (
+    <ChatWorkspace key={activeWorkspace.id} workspace={activeWorkspace} />
+  );
+}
+
+function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
+  const { apiFetch } = useSession();
   const [messages, setMessages] = useState<ChatRecord[]>([]);
   const [recent, setRecent] = useState<ChatRecord[]>([]);
   const [question, setQuestion] = useState("");
@@ -38,10 +82,34 @@ export default function ChatPage() {
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/documents", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((data) => setRecent(data.chats ?? []));
-  }, []);
+    let cancelled = false;
+
+    apiFetch("/api/chat")
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            await readError(response, "Could not load recent questions."),
+          );
+        }
+        return (await response.json()) as { chats?: ChatRecord[] };
+      })
+      .then((data) => {
+        if (!cancelled) setRecent(data.chats ?? []);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Could not load recent questions.",
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch]);
 
   useEffect(
     () => bottom.current?.scrollIntoView({ behavior: "smooth" }),
@@ -65,18 +133,18 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/chat", {
+      const response = await apiFetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: cleanQuestion,
-          viewerRole: role,
-          history,
-        }),
+        body: JSON.stringify({ question: cleanQuestion, history }),
       });
-      const data = await response.json();
 
-      if (!response.ok) throw new Error(data.error);
+      if (!response.ok) {
+        throw new Error(
+          await readError(response, "Could not answer that question."),
+        );
+      }
+
+      const data = (await response.json()) as ChatRecord;
 
       setMessages((items) => [...items, data]);
       setRecent((items) => [
@@ -133,6 +201,12 @@ export default function ChatPage() {
               <p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-semibold text-[#6d8178]">
                 <span className="size-1.5 rounded-full bg-[#0aa37f]" />
                 Grounded answers from relevance-checked chunks
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-[#587067]">
+                Asking:{" "}
+                <span className="font-black text-[#0a3f37]">
+                  {workspace.name}
+                </span>
               </p>
             </div>
           </div>
@@ -206,6 +280,8 @@ export default function ChatPage() {
                                   <p className="mt-1 text-[10px] font-semibold text-[#7b8d85]">
                                     Chunk {item.chunkIndex + 1} /{" "}
                                     {relevanceLabel(item.score)}
+                                    {item.visibility === "private" &&
+                                      " / Private"}
                                   </p>
                                 </div>
                                 <BookOpen
@@ -275,7 +351,8 @@ export default function ChatPage() {
             </button>
           </form>
           <p className="mt-2 text-center text-[10px] font-semibold text-[#7c8f87]">
-            Answers are limited to documents available for your selected role.
+            Answers draw only on documents you can access in {workspace.name},
+            including your private files.
           </p>
         </div>
       </section>
@@ -305,6 +382,9 @@ export default function ChatPage() {
             </h2>
             <div className="mt-3 flex flex-wrap gap-2">
               <Badge>{accessLabels[source.accessLevel]}</Badge>
+              {source.visibility === "private" && (
+                <Badge tone="gold">Private</Badge>
+              )}
               <Badge tone="gray">Chunk {source.chunkIndex + 1}</Badge>
               <Badge tone="gold">{relevanceLabel(source.score)}</Badge>
             </div>
@@ -312,8 +392,9 @@ export default function ChatPage() {
               <p className="text-sm leading-7 text-[#41564d]">{source.text}</p>
             </div>
             <p className="mt-5 text-xs leading-5 text-[#7c8f87]">
-              This is the masked source chunk that survived retrieval relevance
-              checks before being sent to Groq.
+              {source.visibility === "private"
+                ? "This chunk comes from one of your private files. Only you can see it; nobody else's answers draw on it."
+                : "This is the masked source chunk that survived retrieval relevance checks before being sent to Groq."}
             </p>
           </aside>
         </>
