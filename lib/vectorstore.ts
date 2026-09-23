@@ -105,6 +105,27 @@ export async function deleteDocumentVectors(
   await ns.deleteMany(chunkIds);
 }
 
+/**
+ * Rewrite metadata fields on existing records without re-embedding them.
+ * Pinecone merges the given fields into what is stored, so the chunk text and
+ * everything else on the record is left alone.
+ */
+export async function updateVectorMetadata(
+  workspaceId: string,
+  chunkIds: string[],
+  metadata: RecordMetadata,
+) {
+  if (!chunkIds.length) return;
+  const ns = await namespaceFor(workspaceId);
+  // Pinecone updates one record per call; a handful at a time keeps a long
+  // document quick without tripping the rate limit.
+  for (let i = 0; i < chunkIds.length; i += 10) {
+    await Promise.all(
+      chunkIds.slice(i, i + 10).map((id) => ns.update({ id, metadata })),
+    );
+  }
+}
+
 export async function querySimilarChunks(options: {
   workspaceId: string;
   userId: string;

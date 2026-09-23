@@ -7,6 +7,7 @@ import {
   Clock3,
   FileSearch,
   Sparkles,
+  Trash2,
   X,
 } from "@/components/icons";
 import { useEffect, useRef, useState } from "react";
@@ -55,8 +56,8 @@ export default function ChatPage() {
             No workspace selected
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#60756c]">
-            Pick a workspace from the sidebar to start asking questions about
-            its knowledge base.
+            Pick a workspace from the menu at the top right to start asking
+            questions about its knowledge base.
           </p>
         </div>
       </div>
@@ -79,6 +80,7 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   const [loading, setLoading] = useState(false);
   const [source, setSource] = useState<Source>();
   const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState<string>();
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -163,6 +165,29 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
     }
   }
 
+  /**
+   * Deleting also drops the chat from the open conversation, so it stops being
+   * sent as history, and the server no longer offers it as remembered context.
+   */
+  async function remove(id: string) {
+    setDeleting(id);
+    setError("");
+    try {
+      const response = await apiFetch(`/api/chat/${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        throw new Error(await readError(response, "Could not delete that chat."));
+      }
+      setRecent((items) => items.filter((item) => item.id !== id));
+      setMessages((items) => items.filter((item) => item.id !== id));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not delete that chat.",
+      );
+    } finally {
+      setDeleting(undefined);
+    }
+  }
+
   return (
     <div className="flex h-[calc(100vh-72px)] overflow-hidden">
       <aside className="hidden w-[292px] shrink-0 border-r border-[#d9e9e2] bg-[#fbfffd]/82 p-4 backdrop-blur xl:block">
@@ -172,18 +197,36 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
             Recent questions
           </div>
           <p className="mt-3 text-xs leading-5 text-white/64">
-            Re-run a question or use these as anchors for follow-ups.
+            Re-run a question or use these as anchors for follow-ups. Delete
+            one and Mindbase forgets it.
           </p>
         </div>
         <div className="mt-4 space-y-1.5">
           {recent.slice(0, 10).map((item) => (
-            <button
+            <div
               key={item.id}
-              onClick={() => ask(item.question)}
-              className="w-full rounded-2xl px-3 py-3 text-left text-xs font-semibold leading-5 text-[#536b62] hover:bg-[#e5f4ee] hover:text-[#10231e]"
+              className="group flex items-start gap-1 rounded-2xl hover:bg-[#e5f4ee] has-[:focus-visible]:bg-[#e5f4ee]"
             >
-              <span className="line-clamp-2">{item.question}</span>
-            </button>
+              <button
+                onClick={() => ask(item.question)}
+                className="min-w-0 flex-1 px-3 py-3 text-left text-xs font-semibold leading-5 text-[#536b62] outline-none group-hover:text-[#10231e]"
+              >
+                <span className="line-clamp-2">{item.question}</span>
+              </button>
+              <button
+                aria-label={`Delete "${item.question}"`}
+                title="Delete"
+                disabled={deleting === item.id}
+                onClick={() => void remove(item.id)}
+                className={`mr-1.5 mt-2 grid size-7 shrink-0 place-items-center rounded-lg text-[#8a9b93] hover:bg-white hover:text-[#b53d31] focus-visible:opacity-100 ${deleting === item.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+              >
+                {deleting === item.id ? (
+                  <Spinner size={13} />
+                ) : (
+                  <Trash2 size={14} />
+                )}
+              </button>
+            </div>
           ))}
           {!recent.length && (
             <p className="px-3 py-8 text-center text-xs leading-5 text-[#8a9b93]">

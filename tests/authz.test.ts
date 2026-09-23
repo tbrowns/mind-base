@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   accessLevelsFor,
   canAssignRole,
+  canChangeDocumentAccess,
   canDeleteDocument,
   canInspectDocumentAsAdmin,
   canManageMember,
@@ -297,6 +298,32 @@ describe("document deletion", () => {
   it("is refused across workspaces even for an owner", () => {
     expect(
       canDeleteDocument(scope({ userId: "user-root", role: "owner" }), doc({ workspaceId: OTHER_WS })),
+    ).toBe(false);
+  });
+});
+
+describe("changing a document's access level", () => {
+  it("is allowed for the owner", () => {
+    expect(
+      canChangeDocumentAccess(scope({ userId: "user-ann" }), doc({ ownerId: "user-ann" })),
+    ).toBe(true);
+  });
+
+  it("is allowed for an admin on someone else's document", () => {
+    expect(
+      canChangeDocumentAccess(scope({ userId: "user-boss", role: "admin" }), doc({ ownerId: "user-ann" })),
+    ).toBe(true);
+  });
+
+  it("is refused for a member who does not own it, even one who can read it", () => {
+    expect(
+      canChangeDocumentAccess(scope({ userId: "user-bob", role: "member" }), doc({ ownerId: "user-ann" })),
+    ).toBe(false);
+  });
+
+  it("is refused across workspaces even for an owner", () => {
+    expect(
+      canChangeDocumentAccess(scope({ userId: "user-root", role: "owner" }), doc({ workspaceId: OTHER_WS })),
     ).toBe(false);
   });
 });

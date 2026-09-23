@@ -133,6 +133,7 @@ const auditActionLabels: Record<AuditEvent["action"], string> = {
   "join-request.approved": "Join request approved",
   "join-request.rejected": "Join request rejected",
   "document.deleted-by-admin": "Document deleted",
+  "document.access-changed-by-admin": "Document access changed",
   "document.viewed-by-admin": "Private document viewed",
   "workspace.settings-changed": "Upload policy changed",
   "notification.sent": "Notification sent",
@@ -342,7 +343,7 @@ export default function AdminPage() {
         <EmptyCard
           icon={<ShieldCheck size={20} />}
           title="No workspace selected"
-          body="Pick a workspace from the sidebar to administer it."
+          body="Pick a workspace from the menu at the top right to administer it."
         />
       ) : !canAdminister ? (
         <EmptyCard

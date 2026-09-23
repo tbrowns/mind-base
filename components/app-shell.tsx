@@ -4,18 +4,20 @@ import { usePathname } from "next/navigation";
 import {
   BrainCircuit,
   CalendarRange,
+  Check,
   ChevronDown,
   FileText,
   Inbox,
   LayoutDashboard,
   Menu,
+  Plus,
   ShieldCheck,
   X,
 } from "@/components/icons";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Logo } from "./logo";
 import { Spinner } from "./ui";
-import { useSession } from "./session-context";
+import { useSession, type WorkspaceSummary } from "./session-context";
 import { SignInPanel } from "./sign-in-panel";
 import { NotificationsBell } from "./notifications-bell";
 
@@ -121,13 +123,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <p className="px-2 text-[12px] font-bold text-[#244039]">
             {user.displayName || user.email}
           </p>
-          <Link
-            href="/workspaces"
-            onClick={() => setOpen(false)}
-            className="block px-2 text-[12px] font-bold text-[#0aa37f] hover:underline"
-          >
-            Workspaces
-          </Link>
           <button
             onClick={() => void signOut()}
             className="px-2 text-[12px] font-bold text-[#8a9b94] hover:text-[#b53d31]"
@@ -154,37 +149,120 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           {/*
-            Replaces the old "Viewing as" role picker. That control let the
-            client choose its own clearance, which the server then believed.
-            This one only chooses which workspace to look at; the rights that
-            come with it are resolved server-side from membership.
+            The workspace menu replaces the old "Viewing as" role picker. That
+            control let the client choose its own clearance, which the server
+            then believed. This one only chooses which workspace to look at;
+            the rights that come with it are resolved server-side from
+            membership.
           */}
           <div className="ml-auto flex items-center">
             <NotificationsBell />
           </div>
-          <label className="relative ml-3">
-            <span className="sr-only">Workspace</span>
-            <select
-              value={activeWorkspace?.id ?? ""}
-              onChange={(event) => setActiveWorkspaceId(event.target.value)}
-              className="appearance-none rounded-full border border-[#cfe1da] bg-white py-2.5 pl-4 pr-9 text-xs font-bold text-[#244039] shadow-sm outline-none focus:border-[#0aa37f]"
-            >
-              {workspaces.length === 0 && <option value="">No workspace</option>}
-              {workspaces.map((workspace) => (
-                <option key={workspace.id} value={workspace.id}>
-                  {workspace.name}
-                  {workspace.type === "personal" ? " (personal)" : ""}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={13}
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#587067]"
-            />
-          </label>
+          <WorkspaceMenu
+            workspaces={workspaces}
+            activeId={activeWorkspace?.id ?? ""}
+            onPick={setActiveWorkspaceId}
+          />
         </header>
         <main>{children}</main>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The one place to switch workspace, plus the way into creating or joining
+ * one -- which used to be a separate sidebar link doing half the same job.
+ */
+function WorkspaceMenu({
+  workspaces,
+  activeId,
+  onPick,
+}: {
+  workspaces: WorkspaceSummary[];
+  activeId: string;
+  onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const active = workspaces.find((w) => w.id === activeId);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: PointerEvent) {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const label = (w: WorkspaceSummary) =>
+    `${w.name}${w.type === "personal" ? " (personal)" : ""}`;
+
+  return (
+    <div ref={root} className="relative ml-3">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex max-w-[220px] items-center gap-2 rounded-full border border-[#cfe1da] bg-white py-2.5 pl-4 pr-3 text-xs font-bold text-[#244039] shadow-sm outline-none hover:border-[#9fcfbf] focus-visible:border-[#0aa37f]"
+      >
+        <span className="sr-only">Workspace: </span>
+        <span className="truncate">{active ? label(active) : "No workspace"}</span>
+        <ChevronDown
+          size={13}
+          className={`shrink-0 text-[#587067] transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-30 mt-2 w-64 overflow-hidden rounded-2xl border border-[#d9e9e2] bg-white py-1.5 shadow-[0_18px_44px_rgba(10,63,55,.14)]"
+        >
+          <p className="px-4 pb-1 pt-2 text-[10px] font-black uppercase text-[#8a9b94]">
+            Switch workspace
+          </p>
+          {workspaces.map((w) => (
+            <button
+              key={w.id}
+              role="menuitemradio"
+              aria-checked={w.id === activeId}
+              onClick={() => {
+                onPick(w.id);
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-semibold text-[#244039] hover:bg-[#eef7f4] focus-visible:bg-[#eef7f4] focus-visible:outline-none"
+            >
+              <span className="min-w-0 flex-1 truncate">{label(w)}</span>
+              <span className="shrink-0 text-[10px] font-bold uppercase text-[#8a9b94]">
+                {w.role}
+              </span>
+              <Check
+                size={14}
+                className={`shrink-0 text-[#0aa37f] ${w.id === activeId ? "" : "invisible"}`}
+              />
+            </button>
+          ))}
+          <div className="my-1.5 h-px bg-[#e0efe9]" />
+          <Link
+            role="menuitem"
+            href="/workspaces"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-[#0a8068] hover:bg-[#eef7f4] focus-visible:bg-[#eef7f4] focus-visible:outline-none"
+          >
+            <Plus size={14} />
+            Create or join a workspace
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

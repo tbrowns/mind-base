@@ -207,7 +207,7 @@ export default function InboxPage() {
             No workspace selected
           </h2>
           <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#60756c]">
-            Pick a workspace from the sidebar to review its inbox.
+            Pick a workspace from the menu at the top right to review its inbox.
           </p>
         </div>
       ) : (

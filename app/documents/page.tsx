@@ -1,9 +1,16 @@
 "use client";
 import Link from "next/link";
-import { FileText, Layers3, Plus, Search, Trash2 } from "@/components/icons";
+import {
+  ChevronDown,
+  FileText,
+  Layers3,
+  Plus,
+  Search,
+  Trash2,
+} from "@/components/icons";
 import { useCallback, useEffect, useState } from "react";
-import type { DocumentRecord } from "@/lib/types";
-import { accessLabels } from "@/lib/types";
+import type { AccessLevel, DocumentRecord } from "@/lib/types";
+import { ACCESS_LEVEL_ORDER, accessLabels } from "@/lib/types";
 import { Badge, PageHeader, Spinner } from "@/components/ui";
 import { useSession, type WorkspaceSummary } from "@/components/session-context";
 
@@ -61,7 +68,7 @@ export default function DocumentsPage() {
             No workspace selected
           </h2>
           <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#60756c]">
-            Pick a workspace from the sidebar to browse its documents.
+            Pick a workspace from the menu at the top right to browse its documents.
           </p>
         </div>
       )}
@@ -75,6 +82,7 @@ function Library({ workspace }: { workspace: WorkspaceSummary }) {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [deleting, setDeleting] = useState<string>();
+  const [changing, setChanging] = useState<string>();
   const [error, setError] = useState("");
 
   const canManageAll = workspace.role === "admin" || workspace.role === "owner";
@@ -133,6 +141,34 @@ function Library({ workspace }: { workspace: WorkspaceSummary }) {
       );
     } finally {
       setDeleting(undefined);
+    }
+  }
+
+  async function changeAccess(doc: DocumentRecord, accessLevel: AccessLevel) {
+    if (accessLevel === doc.accessLevel) return;
+    setChanging(doc.id);
+    setError("");
+    try {
+      const response = await apiFetch(`/api/documents/${doc.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ accessLevel }),
+      });
+      if (!response.ok) {
+        throw new Error(
+          await readError(response, "Could not change who can access it."),
+        );
+      }
+      setDocuments((list) =>
+        list.map((d) => (d.id === doc.id ? { ...d, accessLevel } : d)),
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not change who can access it.",
+      );
+    } finally {
+      setChanging(undefined);
     }
   }
 
@@ -212,7 +248,41 @@ function Library({ workspace }: { workspace: WorkspaceSummary }) {
                       )}
                     </td>
                     <td className="px-5 py-4">
-                      <Badge tone="gray">{accessLabels[doc.accessLevel]}</Badge>
+                      {mine || canManageAll ? (
+                        <label className="relative inline-flex items-center">
+                          <span className="sr-only">
+                            Who can access {doc.title}
+                          </span>
+                          <select
+                            value={doc.accessLevel}
+                            disabled={changing === doc.id}
+                            onChange={(e) =>
+                              void changeAccess(
+                                doc,
+                                e.target.value as AccessLevel,
+                              )
+                            }
+                            className="appearance-none rounded-full border border-[#dde3dc] bg-[#f4f6f3] py-1 pl-2.5 pr-7 text-[11px] font-semibold text-[#4c5750] outline-none hover:border-[#bfcac2] focus:border-[#21a67a] disabled:cursor-wait disabled:opacity-60"
+                          >
+                            {ACCESS_LEVEL_ORDER.map((level) => (
+                              <option key={level} value={level}>
+                                {accessLabels[level]}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="pointer-events-none absolute right-2 text-[#7e8882]">
+                            {changing === doc.id ? (
+                              <Spinner size={11} />
+                            ) : (
+                              <ChevronDown size={11} />
+                            )}
+                          </span>
+                        </label>
+                      ) : (
+                        <Badge tone="gray">
+                          {accessLabels[doc.accessLevel]}
+                        </Badge>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-sm font-medium">
                       {doc.chunkCount}

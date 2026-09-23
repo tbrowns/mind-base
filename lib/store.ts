@@ -170,6 +170,25 @@ export async function deleteDocument(id: string) {
   });
 }
 
+export async function updateDocumentAccessLevel(
+  id: string,
+  accessLevel: DocumentRecord["accessLevel"],
+) {
+  const db = await getAdminDb();
+  if (db) {
+    await db.collection("documents").doc(id).update({ accessLevel });
+    return;
+  }
+  await localUpdate((data) => {
+    data.documents = data.documents.map((d) =>
+      d.id === id ? { ...d, accessLevel } : d,
+    );
+    data.chunks = data.chunks.map((c) =>
+      c.documentId === id ? { ...c, accessLevel } : c,
+    );
+  });
+}
+
 /* ---------------------------------------------------------------------- chats */
 
 /**
@@ -212,6 +231,30 @@ export async function saveChat(chat: ChatRecord) {
   }
   await localUpdate((data) => {
     data.chats.unshift(chat);
+  });
+}
+
+/**
+ * Fetch one chat by id without assuming the caller may see it; run canReadChat
+ * against the result before acting on it.
+ */
+export async function getChatUnchecked(id: string): Promise<ChatRecord | null> {
+  const db = await getAdminDb();
+  if (db) {
+    const snap = await db.collection("chats").doc(id).get();
+    return snap.exists ? ({ id: snap.id, ...snap.data() } as ChatRecord) : null;
+  }
+  return (await localRead()).chats.find((c) => c.id === id) ?? null;
+}
+
+export async function deleteChat(id: string) {
+  const db = await getAdminDb();
+  if (db) {
+    await db.collection("chats").doc(id).delete();
+    return;
+  }
+  await localUpdate((data) => {
+    data.chats = data.chats.filter((c) => c.id !== id);
   });
 }
 

@@ -363,7 +363,7 @@ export default function NewDocumentPage() {
           </h2>
           <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#60756c]">
             Documents are filed into your active workspace. Pick one from the
-            sidebar to add a document.
+            menu at the top right to add a document.
           </p>
         </div>
       </div>

@@ -134,6 +134,18 @@ export function canDeleteDocument(
 }
 
 /**
+ * Re-filing a document at another tier follows the same rule as deleting it:
+ * its owner, or an admin of its workspace. The new tier is checked separately
+ * against what the actor can read.
+ */
+export function canChangeDocumentAccess(
+  scope: AccessScope,
+  doc: DocumentRecord,
+): boolean {
+  return canDeleteDocument(scope, doc);
+}
+
+/**
  * Whether `scope` may change or remove `target`.
  *
  * An admin may act on members below their own rank only. That stops admins

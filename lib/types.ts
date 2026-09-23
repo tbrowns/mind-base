@@ -237,6 +237,7 @@ export type AuditAction =
   | "join-request.approved"
   | "join-request.rejected"
   | "document.deleted-by-admin"
+  | "document.access-changed-by-admin"
   | "document.viewed-by-admin"
   | "workspace.settings-changed"
   | "notification.sent";
