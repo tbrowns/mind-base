@@ -111,10 +111,13 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
     };
   }, [apiFetch]);
 
-  useEffect(
-    () => bottom.current?.scrollIntoView({ behavior: "smooth" }),
-    [messages, loading],
-  );
+  // Block body on purpose: current Chrome returns a Promise from a smooth
+  // scrollIntoView, and an expression body would hand that to React as the
+  // effect's cleanup -- which it then calls, crashing the page on the next
+  // message or on navigating away.
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
   async function ask(value = question) {
     const cleanQuestion = value.trim();
