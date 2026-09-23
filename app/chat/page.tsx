@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clock3,
   FileSearch,
+  Plus,
   Sparkles,
   Trash2,
   X,
@@ -17,7 +18,7 @@ import {
 } from "@/components/session-context";
 import { Badge, Spinner } from "@/components/ui";
 import type { ChatRecord, Source } from "@/lib/types";
-import { accessLabels } from "@/lib/types";
+import { accessLabels, conversationIdOf } from "@/lib/types";
 
 const suggestions = [
   "What is required for Stage 1?",
@@ -26,10 +27,6 @@ const suggestions = [
   "What are the intellectual property rules?",
   "When is the final MiniHack event?",
 ];
-
-function relevanceLabel(score: number) {
-  return `${Math.round(Math.max(0, Math.min(1, score)) * 100)}% relevance`;
-}
 
 /** Pull the server's `{error}` text out of a failed response, with a fallback. */
 async function readError(response: Response, fallback: string) {
@@ -72,16 +69,101 @@ export default function ChatPage() {
   );
 }
 
+/**
+ * The model marks emphasis with **double asterisks**. Only that is rendered;
+ * anything else in the answer stays plain text, so model output can never
+ * inject markup.
+ */
+function renderAnswer(answer: string) {
+  return answer.split(/(\*\*[^*\n]+\*\*)/g).map((part, index) =>
+    /^\*\*[^*\n]+\*\*$/.test(part) ? (
+      <strong key={index} className="font-bold text-[#10231e]">
+        {part.slice(2, -2)}
+      </strong>
+    ) : (
+      part
+    ),
+  );
+}
+
+/** The sources behind one answer, one entry per document in first-cited order. */
+type DocumentSource = {
+  documentId: string;
+  documentTitle: string;
+  accessLevel: Source["accessLevel"];
+  visibility: Source["visibility"];
+  passages: string[];
+};
+
+/**
+ * Matches how the server numbers documents in the prompt (first-seen order),
+ * so the [n] citations in an answer line up with the nth card.
+ */
+function groupSources(sources: Source[]): DocumentSource[] {
+  const groups = new Map<string, DocumentSource>();
+  sources.forEach((item) => {
+    const key = item.documentId || item.documentTitle;
+    const text = item.text || item.preview;
+    const existing = groups.get(key);
+    if (existing) {
+      if (text) existing.passages.push(text);
+      return;
+    }
+    groups.set(key, {
+      documentId: item.documentId,
+      documentTitle: item.documentTitle,
+      accessLevel: item.accessLevel,
+      visibility: item.visibility,
+      passages: text ? [text] : [],
+    });
+  });
+  return [...groups.values()];
+}
+
+type Conversation = {
+  id: string;
+  title: string;
+  turns: ChatRecord[];
+  updatedAt: string;
+};
+
+/** Newest conversation first; turns inside each one oldest first. */
+function groupConversations(chats: ChatRecord[]): Conversation[] {
+  const groups = new Map<string, ChatRecord[]>();
+  chats.forEach((chat) => {
+    const id = conversationIdOf(chat);
+    groups.set(id, [...(groups.get(id) ?? []), chat]);
+  });
+  return [...groups.entries()]
+    .map(([id, turns]) => {
+      const ordered = [...turns].sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt),
+      );
+      return {
+        id,
+        title: ordered[0].question,
+        turns: ordered,
+        updatedAt: ordered[ordered.length - 1].createdAt,
+      };
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
 function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   const { apiFetch } = useSession();
+  const [conversationId, setConversationId] = useState(() =>
+    crypto.randomUUID(),
+  );
   const [messages, setMessages] = useState<ChatRecord[]>([]);
   const [recent, setRecent] = useState<ChatRecord[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
-  const [source, setSource] = useState<Source>();
+  const [source, setSource] = useState<DocumentSource>();
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState<string>();
   const bottom = useRef<HTMLDivElement>(null);
+
+  const conversations = groupConversations(recent);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +172,7 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(
-            await readError(response, "Could not load recent questions."),
+            await readError(response, "Could not load your conversations."),
           );
         }
         return (await response.json()) as { chats?: ChatRecord[] };
@@ -103,7 +185,7 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
           setError(
             err instanceof Error
               ? err.message
-              : "Could not load recent questions.",
+              : "Could not load your conversations.",
           );
         }
       });
@@ -120,6 +202,22 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  function startNew() {
+    if (loading) return;
+    setConversationId(crypto.randomUUID());
+    setMessages([]);
+    setSource(undefined);
+    setError("");
+  }
+
+  function open(conversation: Conversation) {
+    if (loading) return;
+    setConversationId(conversation.id);
+    setMessages(conversation.turns);
+    setSource(undefined);
+    setError("");
+  }
 
   async function ask(value = question) {
     const cleanQuestion = value.trim();
@@ -140,7 +238,11 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
     try {
       const response = await apiFetch("/api/chat", {
         method: "POST",
-        body: JSON.stringify({ question: cleanQuestion, history }),
+        body: JSON.stringify({
+          question: cleanQuestion,
+          history,
+          conversationId,
+        }),
       });
 
       if (!response.ok) {
@@ -166,8 +268,8 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   }
 
   /**
-   * Deleting also drops the chat from the open conversation, so it stops being
-   * sent as history, and the server no longer offers it as remembered context.
+   * Deletes every turn of the conversation. If it is the one on screen, the
+   * view resets too, so none of it is sent as history afterwards.
    */
   async function remove(id: string) {
     setDeleting(id);
@@ -175,13 +277,19 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
     try {
       const response = await apiFetch(`/api/chat/${id}`, { method: "DELETE" });
       if (!response.ok) {
-        throw new Error(await readError(response, "Could not delete that chat."));
+        throw new Error(
+          await readError(response, "Could not delete that conversation."),
+        );
       }
-      setRecent((items) => items.filter((item) => item.id !== id));
-      setMessages((items) => items.filter((item) => item.id !== id));
+      setRecent((items) =>
+        items.filter((item) => conversationIdOf(item) !== id),
+      );
+      if (id === conversationId) startNew();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Could not delete that chat.",
+        err instanceof Error
+          ? err.message
+          : "Could not delete that conversation.",
       );
     } finally {
       setDeleting(undefined);
@@ -190,47 +298,71 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
 
   return (
     <div className="flex h-[calc(100vh-72px)] overflow-hidden">
-      <aside className="hidden w-[292px] shrink-0 border-r border-[#d9e9e2] bg-[#fbfffd]/82 p-4 backdrop-blur xl:block">
-        <div className="rounded-[22px] bg-[#0a3f37] p-4 text-white">
-          <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-[#9dffe5]">
-            <Clock3 size={14} />
-            Recent questions
-          </div>
-          <p className="mt-3 text-xs leading-5 text-white/64">
-            Re-run a question or use these as anchors for follow-ups. Delete
-            one and Mindbase forgets it.
-          </p>
+      <aside className="hidden w-[292px] shrink-0 flex-col border-r border-[#d9e9e2] bg-[#fbfffd]/82 p-4 backdrop-blur xl:flex">
+        <button
+          onClick={startNew}
+          disabled={loading}
+          className="flex items-center justify-center gap-2 rounded-2xl bg-[#0a3f37] px-4 py-3 text-xs font-bold text-white shadow-[0_12px_26px_rgba(10,63,55,.16)] hover:bg-[#126153] disabled:opacity-60"
+        >
+          <Plus size={15} />
+          New chat
+        </button>
+        <div className="mt-5 flex items-center gap-2 px-3 text-[10px] font-black uppercase text-[#7c8f87]">
+          <Clock3 size={13} />
+          Conversations
         </div>
-        <div className="mt-4 space-y-1.5">
-          {recent.slice(0, 10).map((item) => (
-            <div
-              key={item.id}
-              className="group flex items-start gap-1 rounded-2xl hover:bg-[#e5f4ee] has-[:focus-visible]:bg-[#e5f4ee]"
-            >
-              <button
-                onClick={() => ask(item.question)}
-                className="min-w-0 flex-1 px-3 py-3 text-left text-xs font-semibold leading-5 text-[#536b62] outline-none group-hover:text-[#10231e]"
+        <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto">
+          {conversations.map((conversation) => {
+            const current = conversation.id === conversationId;
+            return (
+              <div
+                key={conversation.id}
+                className={`group flex items-start gap-1 rounded-2xl ${
+                  current
+                    ? "bg-[#e5f4ee]"
+                    : "hover:bg-[#eef7f3] has-[:focus-visible]:bg-[#eef7f3]"
+                }`}
               >
-                <span className="line-clamp-2">{item.question}</span>
-              </button>
-              <button
-                aria-label={`Delete "${item.question}"`}
-                title="Delete"
-                disabled={deleting === item.id}
-                onClick={() => void remove(item.id)}
-                className={`mr-1.5 mt-2 grid size-7 shrink-0 place-items-center rounded-lg text-[#8a9b93] hover:bg-white hover:text-[#b53d31] focus-visible:opacity-100 ${deleting === item.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-              >
-                {deleting === item.id ? (
-                  <Spinner size={13} />
-                ) : (
-                  <Trash2 size={14} />
-                )}
-              </button>
-            </div>
-          ))}
-          {!recent.length && (
+                <button
+                  onClick={() => open(conversation)}
+                  aria-current={current ? "true" : undefined}
+                  className="min-w-0 flex-1 px-3 py-2.5 text-left outline-none"
+                >
+                  <span
+                    className={`line-clamp-2 text-xs font-semibold leading-5 ${current ? "text-[#10231e]" : "text-[#536b62] group-hover:text-[#10231e]"}`}
+                  >
+                    {conversation.title}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] font-semibold text-[#8a9b93]">
+                    {conversation.turns.length === 1
+                      ? "1 question"
+                      : `${conversation.turns.length} questions`}
+                    {" · "}
+                    {new Date(conversation.updatedAt).toLocaleDateString(
+                      undefined,
+                      { month: "short", day: "numeric" },
+                    )}
+                  </span>
+                </button>
+                <button
+                  aria-label={`Delete conversation "${conversation.title}"`}
+                  title="Delete conversation"
+                  disabled={deleting === conversation.id}
+                  onClick={() => void remove(conversation.id)}
+                  className={`mr-1.5 mt-2 grid size-7 shrink-0 place-items-center rounded-lg text-[#8a9b93] hover:bg-white hover:text-[#b53d31] focus-visible:opacity-100 ${deleting === conversation.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+                >
+                  {deleting === conversation.id ? (
+                    <Spinner size={13} />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
+                </button>
+              </div>
+            );
+          })}
+          {!conversations.length && (
             <p className="px-3 py-8 text-center text-xs leading-5 text-[#8a9b93]">
-              Your recent questions will appear here.
+              Your conversations will appear here.
             </p>
           )}
         </div>
@@ -246,7 +378,7 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
               <h1 className="text-sm font-black">Ask Mindbase</h1>
               <p className="mt-0.5 flex items-center gap-1.5 text-[11px] font-semibold text-[#6d8178]">
                 <span className="size-1.5 rounded-full bg-[#0aa37f]" />
-                Grounded answers from relevance-checked chunks
+                Grounded answers, cited to your documents
               </p>
               <p className="mt-1 text-[11px] font-semibold text-[#587067]">
                 Asking:{" "}
@@ -256,6 +388,17 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
               </p>
             </div>
           </div>
+          {/* The sidebar is hidden below xl, so this is the way back to a blank chat there. */}
+          {messages.length > 0 && (
+            <button
+              onClick={startNew}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-xl border border-[#cfe1da] bg-white px-3 py-2 text-[11px] font-bold text-[#244039] hover:border-[#9fcfbf] disabled:opacity-60 xl:hidden"
+            >
+              <Plus size={13} />
+              New chat
+            </button>
+          )}
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 pb-36 pt-8 md:px-8">
@@ -270,7 +413,7 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
                 </h2>
                 <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#667a71]">
                   Mindbase searches your library, filters for relevance, then
-                  answers only from cited source chunks.
+                  answers only from the documents it cites.
                 </p>
                 <div className="mx-auto mt-7 grid max-w-2xl gap-2 sm:grid-cols-2">
                   {suggestions.map((item, index) => (
@@ -290,60 +433,60 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
               </div>
             )}
 
-            {messages.map((message) => (
-              <article key={message.id} className="mb-10 animate-rise">
-                <div className="ml-auto max-w-[82%] rounded-[22px] rounded-br-md bg-[#0a3f37] px-4 py-3 text-sm font-medium leading-6 text-white shadow-[0_12px_24px_rgba(10,63,55,.12)]">
-                  {message.question}
-                </div>
-                <div className="mt-5 flex gap-3">
-                  <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-2xl bg-[#dff8ef] text-[#08735f]">
-                    <BrainCircuit size={17} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="whitespace-pre-wrap rounded-[22px] border border-[#d9e9e2] bg-white/88 px-5 py-4 text-sm leading-7 text-[#24372f] shadow-sm">
-                      {message.answer}
-                    </div>
-                    {message.sources.length > 0 && (
-                      <div className="mt-5">
-                        <p className="mb-2 text-[10px] font-black uppercase text-[#7c8f87]">
-                          Sources used / {message.sources.length}
-                        </p>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          {message.sources.map((item, index) => (
-                            <button
-                              key={item.id}
-                              onClick={() => setSource(item)}
-                              className="group rounded-2xl border border-[#d9e9e2] bg-white/88 p-3 text-left shadow-sm hover:border-[#8adbc8]"
-                            >
-                              <div className="flex items-start gap-3">
-                                <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-[#e5f7f1] text-[11px] font-black text-[#08735f]">
+            {messages.map((message) => {
+              const documents = groupSources(message.sources);
+              return (
+                <article key={message.id} className="mb-10 animate-rise">
+                  <div className="ml-auto max-w-[82%] rounded-[22px] rounded-br-md bg-[#0a3f37] px-4 py-3 text-sm font-medium leading-6 text-white shadow-[0_12px_24px_rgba(10,63,55,.12)]">
+                    {message.question}
+                  </div>
+                  <div className="mt-5 flex gap-3">
+                    <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-2xl bg-[#dff8ef] text-[#08735f]">
+                      <BrainCircuit size={17} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="whitespace-pre-wrap rounded-[22px] border border-[#d9e9e2] bg-white/88 px-5 py-4 text-sm leading-7 text-[#24372f] shadow-sm">
+                        {renderAnswer(message.answer)}
+                      </div>
+                      {documents.length > 0 && (
+                        <div className="mt-5">
+                          <p className="mb-2 text-[10px] font-black uppercase text-[#7c8f87]">
+                            {documents.length === 1
+                              ? "Source"
+                              : `Sources / ${documents.length}`}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {documents.map((doc, index) => (
+                              <button
+                                key={doc.documentId || doc.documentTitle}
+                                onClick={() => setSource(doc)}
+                                className="group flex max-w-full items-center gap-2.5 rounded-2xl border border-[#d9e9e2] bg-white/88 py-2 pl-2 pr-3 text-left shadow-sm hover:border-[#8adbc8]"
+                              >
+                                <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[#e5f7f1] text-[11px] font-black text-[#08735f]">
                                   {index + 1}
                                 </span>
-                                <div className="min-w-0">
-                                  <p className="truncate text-xs font-black">
-                                    {item.documentTitle}
-                                  </p>
-                                  <p className="mt-1 text-[10px] font-semibold text-[#7b8d85]">
-                                    Chunk {item.chunkIndex + 1} /{" "}
-                                    {relevanceLabel(item.score)}
-                                    {item.visibility === "private" &&
-                                      " / Private"}
-                                  </p>
-                                </div>
+                                <span className="min-w-0 truncate text-xs font-black">
+                                  {doc.documentTitle}
+                                </span>
+                                {doc.visibility === "private" && (
+                                  <span className="shrink-0 text-[10px] font-bold text-[#a07a1c]">
+                                    Private
+                                  </span>
+                                )}
                                 <BookOpen
                                   size={14}
-                                  className="ml-auto shrink-0 text-[#91a39b] group-hover:text-[#08735f]"
+                                  className="shrink-0 text-[#91a39b] group-hover:text-[#08735f]"
                                 />
-                              </div>
-                            </button>
-                          ))}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
 
             {loading && (
               <div className="flex gap-3 animate-rise">
@@ -386,7 +529,11 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
                 }
               }}
               rows={1}
-              placeholder="Ask a question about your knowledge base..."
+              placeholder={
+                messages.length
+                  ? "Ask a follow-up..."
+                  : "Ask a question about your knowledge base..."
+              }
               className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-3 py-3 text-sm outline-none"
             />
             <button
@@ -414,7 +561,7 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-[10px] font-black uppercase text-[#08735f]">
                 <FileSearch size={15} />
-                Source preview
+                Source
               </div>
               <button
                 onClick={() => setSource(undefined)}
@@ -431,16 +578,24 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
               {source.visibility === "private" && (
                 <Badge tone="gold">Private</Badge>
               )}
-              <Badge tone="gray">Chunk {source.chunkIndex + 1}</Badge>
-              <Badge tone="gold">{relevanceLabel(source.score)}</Badge>
             </div>
-            <div className="mt-7 rounded-[22px] border border-[#d9e9e2] bg-[#f6fbf8] p-5">
-              <p className="text-sm leading-7 text-[#41564d]">{source.text}</p>
+            <p className="mt-7 text-[10px] font-black uppercase text-[#7c8f87]">
+              What Mindbase read from it
+            </p>
+            <div className="mt-3 space-y-3 rounded-[22px] border border-[#d9e9e2] bg-[#f6fbf8] p-5">
+              {source.passages.map((passage, index) => (
+                <p
+                  key={index}
+                  className={`text-sm leading-7 text-[#41564d] ${index ? "border-t border-[#d9e9e2] pt-3" : ""}`}
+                >
+                  {passage}
+                </p>
+              ))}
             </div>
             <p className="mt-5 text-xs leading-5 text-[#7c8f87]">
               {source.visibility === "private"
-                ? "This chunk comes from one of your private files. Only you can see it; nobody else's answers draw on it."
-                : "This is the masked source chunk that survived retrieval relevance checks before being sent to Groq."}
+                ? "This is one of your private files. Only you can see it; nobody else's answers draw on it."
+                : "Personal information was masked before this text was stored or sent to the model."}
             </p>
           </aside>
         </>

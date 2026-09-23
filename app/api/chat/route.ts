@@ -1,8 +1,9 @@
-import { generateAnswer } from "@/lib/ai";
+import { generateAnswer, selectContexts } from "@/lib/ai";
 import type { ConversationTurn } from "@/lib/ai";
 import { searchDocuments } from "@/lib/retrieval";
 import { listChatsFor, saveChat } from "@/lib/store";
 import { authorize, errorResponse, workspaceIdFrom } from "@/lib/auth";
+import { conversationIdOf } from "@/lib/types";
 import type { AccessScope, ChatRecord, ViewerRole } from "@/lib/types";
 
 /**
@@ -33,6 +34,17 @@ function cleanHistory(value: unknown): ConversationTurn[] {
     .slice(-5);
 }
 
+/**
+ * A conversation id is only a grouping label: every read and delete is also
+ * scoped to this user and workspace, so a guessed or foreign id can at worst
+ * start a thread of the caller's own. Anything malformed starts a new one.
+ */
+function conversationIdFrom(value: unknown): string {
+  return typeof value === "string" && /^[A-Za-z0-9-]{8,64}$/.test(value)
+    ? value
+    : crypto.randomUUID();
+}
+
 /** The stored label for a chat, kept for display only. Never used to authorize. */
 function viewerRoleFor(scope: AccessScope): ViewerRole {
   const highest = scope.accessLevels[scope.accessLevels.length - 1];
@@ -47,6 +59,7 @@ export async function POST(request: Request) {
       question?: string;
       workspaceId?: string;
       history?: unknown;
+      conversationId?: unknown;
     };
 
     const { scope } = await authorize(request, workspaceIdFrom(request, body));
@@ -56,25 +69,33 @@ export async function POST(request: Request) {
       return Response.json({ error: "Ask a question first." }, { status: 400 });
     }
 
+    const conversationId = conversationIdFrom(body.conversationId);
     const requestHistory = cleanHistory(body.history);
-    const ranked = await searchDocuments(scope, cleanQuestion);
+    // Only the chunks the answer is built from become its sources, so every
+    // document listed under an answer is one the model actually saw.
+    const used = selectContexts(await searchDocuments(scope, cleanQuestion));
 
+    // Memory comes from this conversation only: a fresh chat should not be
+    // steered by whatever the user asked in an unrelated one.
     const remembered =
       requestHistory.length > 0
         ? requestHistory
-        : (await listChatsFor(scope.workspaceId, scope.userId, 5))
+        : (await listChatsFor(scope.workspaceId, scope.userId, 200))
+            .filter((chat) => conversationIdOf(chat) === conversationId)
+            .slice(0, 5)
             .reverse()
             .map(({ question, answer }) => ({ question, answer }));
 
-    const answer = await generateAnswer(cleanQuestion, ranked, remembered);
+    const answer = await generateAnswer(cleanQuestion, used, remembered);
 
     const chat: ChatRecord = {
       id: crypto.randomUUID(),
       workspaceId: scope.workspaceId,
       userId: scope.userId,
+      conversationId,
       question: cleanQuestion,
       answer,
-      sources: ranked.map((chunk) => ({
+      sources: used.map((chunk) => ({
         id: chunk.id,
         documentId: chunk.documentId,
         documentTitle: chunk.documentTitle,
@@ -100,7 +121,8 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const { scope } = await authorize(request, workspaceIdFrom(request));
-    const chats = await listChatsFor(scope.workspaceId, scope.userId);
+    // Enough turns to rebuild recent conversations whole; the client groups them.
+    const chats = await listChatsFor(scope.workspaceId, scope.userId, 300);
     return Response.json({ chats });
   } catch (error) {
     return errorResponse(error);

@@ -126,12 +126,22 @@ export type ChatRecord = {
   id: string;
   workspaceId: string;
   userId: string;
+  /**
+   * Groups the turns of one conversation. Absent on chats saved before
+   * conversations existed; each of those is a conversation of its own, so
+   * read it through conversationIdOf().
+   */
+  conversationId?: string;
   question: string;
   answer: string;
   sources: Source[];
   viewerRole: ViewerRole;
   createdAt: string;
 };
+
+export function conversationIdOf(chat: Pick<ChatRecord, "id" | "conversationId">) {
+  return chat.conversationId || chat.id;
+}
 
 export const accessLabels: Record<AccessLevel, string> = {
   "all-team": "All Team",

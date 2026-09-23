@@ -1,24 +1,21 @@
-import { deleteChat, getChatUnchecked } from "@/lib/store";
+import { deleteConversation } from "@/lib/store";
 import { authorize, errorResponse, HttpError, workspaceIdFrom } from "@/lib/auth";
-import { canReadChat } from "@/lib/authz";
 
 type Context = { params: Promise<{ id: string }> };
 
 /**
- * Only the author can delete a chat, the same rule as reading one. Someone
- * else's chat returns 404 rather than 403 so ids cannot be probed.
+ * Delete one of the caller's conversations, every turn of it. The store only
+ * matches the caller's own chats in this workspace, so someone else's
+ * conversation id finds nothing and returns 404, the same as a missing one.
  */
 export async function DELETE(request: Request, context: Context) {
   try {
     const { id } = await context.params;
     const { scope } = await authorize(request, workspaceIdFrom(request));
 
-    const chat = await getChatUnchecked(id);
-    if (!chat || !canReadChat(scope, chat)) {
-      throw new HttpError(404, "Chat not found.");
-    }
-    await deleteChat(id);
-    return Response.json({ ok: true });
+    const removed = await deleteConversation(scope.workspaceId, scope.userId, id);
+    if (!removed) throw new HttpError(404, "Conversation not found.");
+    return Response.json({ ok: true, removed });
   } catch (error) {
     return errorResponse(error);
   }

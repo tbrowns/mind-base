@@ -2,6 +2,7 @@ import "server-only";
 import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getAdminDb } from "./firebase";
 import { localRead, localUpdate } from "./local-store";
+import { conversationIdOf } from "./types";
 import type {
   ChatRecord,
   ChunkRecord,
@@ -235,27 +236,47 @@ export async function saveChat(chat: ChatRecord) {
 }
 
 /**
- * Fetch one chat by id without assuming the caller may see it; run canReadChat
- * against the result before acting on it.
+ * Delete every turn of one of this user's conversations. Scoped by workspace
+ * and user in the query itself, so a conversation id belonging to someone
+ * else simply matches nothing. Returns how many turns were removed.
  */
-export async function getChatUnchecked(id: string): Promise<ChatRecord | null> {
+export async function deleteConversation(
+  workspaceId: string,
+  userId: string,
+  conversationId: string,
+): Promise<number> {
+  if (!workspaceId || !userId || !conversationId) return 0;
   const db = await getAdminDb();
   if (db) {
-    const snap = await db.collection("chats").doc(id).get();
-    return snap.exists ? ({ id: snap.id, ...snap.data() } as ChatRecord) : null;
+    const snap = await db
+      .collection("chats")
+      .where("workspaceId", "==", workspaceId)
+      .where("userId", "==", userId)
+      .get();
+    const doomed = snap.docs.filter(
+      (d: QueryDocumentSnapshot) =>
+        conversationIdOf({ id: d.id, ...d.data() } as ChatRecord) ===
+        conversationId,
+    );
+    const batch = db.batch();
+    doomed.forEach((d: QueryDocumentSnapshot) => batch.delete(d.ref));
+    if (doomed.length) await batch.commit();
+    return doomed.length;
   }
-  return (await localRead()).chats.find((c) => c.id === id) ?? null;
-}
-
-export async function deleteChat(id: string) {
-  const db = await getAdminDb();
-  if (db) {
-    await db.collection("chats").doc(id).delete();
-    return;
-  }
+  let removed = 0;
   await localUpdate((data) => {
-    data.chats = data.chats.filter((c) => c.id !== id);
+    const before = data.chats.length;
+    data.chats = data.chats.filter(
+      (c) =>
+        !(
+          c.workspaceId === workspaceId &&
+          c.userId === userId &&
+          conversationIdOf(c) === conversationId
+        ),
+    );
+    removed = before - data.chats.length;
   });
+  return removed;
 }
 
 /* ------------------------------------------------------------ ingestion jobs */
