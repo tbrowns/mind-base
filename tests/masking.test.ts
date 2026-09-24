@@ -48,6 +48,58 @@ describe("maskSensitiveData", () => {
     );
   });
 
+  /*
+   * Every upload is masked now, so a false positive is no longer confined to
+   * email imports: masking a deadline or an amount breaks ordinary answers.
+   */
+  it("leaves dates, amounts and reference numbers alone", () => {
+    for (const text of [
+      "Submissions close on 2026-06-28 at 17:00.",
+      "The budget is KES 12 500 000 for the year.",
+      "Invoice INV-2026-000123 is due.",
+      "Reference number 20260628 applies.",
+      "Meeting at 08:30, 0.5% fee, versions 1.2.3.",
+    ]) {
+      expect(maskSensitiveData(text)).toBe(text);
+    }
+  });
+
+  it("masks phone numbers in the common written forms", () => {
+    for (const phone of [
+      "0712 345 678",
+      "0712345678",
+      "+254 712 345 678",
+      "254712345678",
+      "020 2345678",
+      "(020) 234 5678",
+      "+1 (415) 555-2671",
+      "415-555-2671",
+    ]) {
+      expect(maskSensitiveData(`call ${phone} today`)).toBe(
+        "call [masked phone number] today",
+      );
+    }
+  });
+
+  it("keeps the full stop after a phone number", () => {
+    expect(maskSensitiveData("Call +254 712 345 678.")).toBe(
+      "Call [masked phone number].",
+    );
+  });
+
+  it("masks long unbroken digit runs such as account numbers", () => {
+    expect(maskSensitiveData("account 1234567890 at the bank")).toBe(
+      "account [masked number] at the bank",
+    );
+  });
+
+  it("is idempotent, so already-masked imports are not changed again", () => {
+    const once = maskSensitiveData(
+      "Ann (ann@acme.co.ke, 0712345678) paid with 4111 1111 1111 1111",
+    );
+    expect(maskSensitiveData(once)).toBe(once);
+  });
+
   it("handles several kinds at once", () => {
     const masked = maskSensitiveData(
       "Ann (ann@acme.co.ke, 0712345678) paid with 4111 1111 1111 1111",
