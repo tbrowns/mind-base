@@ -88,7 +88,10 @@ export async function createWorkspace(input: {
   owner: AuthUser;
 }): Promise<Workspace> {
   const workspace: Workspace = {
-    id: randomUUID(),
+    // A personal workspace's id is derived from its owner, so two first
+    // requests racing through ensurePersonalWorkspace (sign-in fires one, the
+    // demo flow another) write the same record instead of creating two.
+    id: input.type === "personal" ? `personal-${input.owner.userId}` : randomUUID(),
     type: input.type,
     name: input.name.trim() || "Untitled workspace",
     ownerId: input.owner.userId,

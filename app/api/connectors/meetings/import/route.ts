@@ -1,6 +1,12 @@
 import { processIngestionJob } from "@/lib/process-ingestion-job";
 import { saveIngestionJob, saveMeetingImport } from "@/lib/store";
-import { authorize, errorResponse, HttpError, workspaceIdFrom } from "@/lib/auth";
+import {
+  authorize,
+  errorResponse,
+  HttpError,
+  requireFullAccount,
+  workspaceIdFrom,
+} from "@/lib/auth";
 import { ACCESS_LEVEL_ORDER } from "@/lib/types";
 import type {
   AccessLevel,
@@ -17,6 +23,7 @@ export async function POST(request: Request) {
       request,
       workspaceIdFrom(request, body),
     );
+    requireFullAccount(user, "import meetings");
 
     const meetingTitle =
       typeof body.meetingTitle === "string" ? body.meetingTitle.trim() : "";

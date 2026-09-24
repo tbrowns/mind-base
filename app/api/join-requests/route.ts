@@ -1,4 +1,9 @@
-import { authenticate, errorResponse, HttpError } from "@/lib/auth";
+import {
+  authenticate,
+  errorResponse,
+  HttpError,
+  requireFullAccount,
+} from "@/lib/auth";
 import {
   createJoinRequest,
   findWorkspaceByJoinCode,
@@ -16,6 +21,7 @@ import {
 export async function POST(request: Request) {
   try {
     const user = await authenticate(request);
+    requireFullAccount(user, "join a workspace");
     const body = (await request.json()) as { joinCode?: string; message?: string };
 
     const code = body.joinCode?.trim() ?? "";

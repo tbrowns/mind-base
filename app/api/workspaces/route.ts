@@ -1,4 +1,9 @@
-import { authenticate, errorResponse, HttpError } from "@/lib/auth";
+import {
+  authenticate,
+  errorResponse,
+  HttpError,
+  requireFullAccount,
+} from "@/lib/auth";
 import {
   createWorkspace,
   ensurePersonalWorkspace,
@@ -46,6 +51,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const user = await authenticate(request);
+    requireFullAccount(user, "start an organisation");
     const body = (await request.json()) as { name?: string };
     const name = body.name?.trim() ?? "";
     if (!name) throw new HttpError(400, "Give the workspace a name.");

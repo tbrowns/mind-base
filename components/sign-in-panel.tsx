@@ -10,7 +10,7 @@ import { missingClientConfig } from "@/lib/client/firebase";
  * which is now every route: there is no anonymous view of a knowledge base.
  */
 export function SignInPanel() {
-  const { signIn, signUp, configured } = useSession();
+  const { signIn, signUp, startDemo, configured } = useSession();
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -65,8 +65,39 @@ export function SignInPanel() {
     }
   }
 
+  async function tryDemo() {
+    setError("");
+    setBusy(true);
+    try {
+      await startDemo();
+    } catch (caught) {
+      setError(readableAuthError(caught));
+      setBusy(false);
+    }
+  }
+
   return (
     <Shell>
+      <button
+        type="button"
+        onClick={() => void tryDemo()}
+        disabled={busy}
+        className="mb-6 flex w-full items-center justify-between gap-3 rounded-2xl border border-[#b9e6d6] bg-[#effaf5] px-4 py-3.5 text-left transition hover:border-[#0aa37f] disabled:opacity-60"
+      >
+        <span>
+          <span className="block text-sm font-black text-[#0a3f37]">
+            Try the demo
+          </span>
+          <span className="mt-0.5 block text-[12px] leading-5 text-[#48635b]">
+            No sign-up. A private workspace with a sample document, ready to
+            question.
+          </span>
+        </span>
+        <span className="shrink-0 rounded-xl bg-[#0aa37f] px-3 py-2 text-[12px] font-black text-white">
+          Start
+        </span>
+      </button>
+
       <h1 className="text-2xl font-black text-[#101b18]">
         {mode === "in" ? "Sign in to Mindbase" : "Create your account"}
       </h1>
@@ -199,6 +230,8 @@ function readableAuthError(error: unknown): string {
       return "That doesn't look like an email address.";
     case "auth/too-many-requests":
       return "Too many attempts. Wait a moment and try again.";
+    case "auth/admin-restricted-operation":
+      return "The demo isn't switched on for this site yet. Create an account instead.";
     case "auth/operation-not-allowed":
       return "Email sign-in isn't enabled on this Firebase project yet.";
     case "auth/network-request-failed":

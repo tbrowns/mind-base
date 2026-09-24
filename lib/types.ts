@@ -269,6 +269,12 @@ export type AuthUser = {
   userId: string;
   email: string;
   displayName?: string;
+  /**
+   * An anonymous demo session. Guests work only in their own personal
+   * workspace: they cannot create or join organisations or connect mail, so a
+   * throwaway identity never appears in anyone else's member list or inbox.
+   */
+  guest?: boolean;
 };
 
 /**

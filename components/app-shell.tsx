@@ -38,8 +38,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     activeWorkspace,
     setActiveWorkspaceId,
     signOut,
+    guest,
+    preparingDemo,
   } = useSession();
   const [open, setOpen] = useState(false);
+
+  if (preparingDemo) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#eef7f4] px-6 text-center">
+        <div>
+          <span className="mx-auto grid size-12 place-items-center text-[#0aa37f]">
+            <Spinner size={26} />
+          </span>
+          <p className="mt-4 text-sm font-black text-[#101b18]">
+            Setting up your demo workspace
+          </p>
+          <p className="mt-1 text-[13px] text-[#60756c]">
+            Masking, chunking and indexing the sample document.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -121,7 +141,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="mt-auto space-y-2 border-t border-[#e0efe9] pt-4">
           <p className="px-2 text-[12px] font-bold text-[#244039]">
-            {user.displayName || user.email}
+            {guest ? "Demo guest" : user.displayName || user.email}
           </p>
           <button
             onClick={() => void signOut()}
@@ -159,11 +179,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <NotificationsBell />
           </div>
           <WorkspaceMenu
+            guest={guest}
             workspaces={workspaces}
             activeId={activeWorkspace?.id ?? ""}
             onPick={setActiveWorkspaceId}
           />
         </header>
+        {guest && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#f0dfb0] bg-[#fff8e6] px-5 py-2.5 text-[12px] text-[#6b5412] md:px-8 lg:px-10">
+            <p>
+              <span className="font-black">Demo workspace.</span> It&apos;s
+              private to this browser and is gone once you leave the demo.
+            </p>
+            <button
+              onClick={() => void signOut()}
+              className="font-black text-[#0a3f37] hover:underline"
+            >
+              Leave demo
+            </button>
+          </div>
+        )}
         <main>{children}</main>
       </div>
     </div>
@@ -175,10 +210,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
  * one -- which used to be a separate sidebar link doing half the same job.
  */
 function WorkspaceMenu({
+  guest,
   workspaces,
   activeId,
   onPick,
 }: {
+  guest: boolean;
   workspaces: WorkspaceSummary[];
   activeId: string;
   onPick: (id: string) => void;
@@ -251,16 +288,21 @@ function WorkspaceMenu({
               />
             </button>
           ))}
-          <div className="my-1.5 h-px bg-[#e0efe9]" />
-          <Link
-            role="menuitem"
-            href="/workspaces"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-[#0a8068] hover:bg-[#eef7f4] focus-visible:bg-[#eef7f4] focus-visible:outline-none"
-          >
-            <Plus size={14} />
-            Create or join a workspace
-          </Link>
+          {/* Guests cannot start or join organisations; the API refuses too. */}
+          {!guest && (
+            <>
+              <div className="my-1.5 h-px bg-[#e0efe9]" />
+              <Link
+                role="menuitem"
+                href="/workspaces"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-[#0a8068] hover:bg-[#eef7f4] focus-visible:bg-[#eef7f4] focus-visible:outline-none"
+              >
+                <Plus size={14} />
+                Create or join a workspace
+              </Link>
+            </>
+          )}
         </div>
       )}
     </div>

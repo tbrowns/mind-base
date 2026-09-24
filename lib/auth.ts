@@ -62,6 +62,16 @@ export async function authenticate(request: Request): Promise<AuthUser> {
     // "revoked" tells an attacker which of their guesses was closest.
     throw new HttpError(401, "Your session has expired. Sign in again.");
   }
+  if (decoded.firebase?.sign_in_provider === "anonymous") {
+    // .invalid is reserved (RFC 2606), so this label can never collide with,
+    // or be mistaken for, a real address.
+    return {
+      userId: decoded.uid,
+      email: `guest-${decoded.uid.slice(0, 6).toLowerCase()}@demo.invalid`,
+      displayName: "Demo guest",
+      guest: true,
+    };
+  }
   if (!decoded.email) {
     throw new HttpError(403, "This account has no email address.");
   }
@@ -70,6 +80,13 @@ export async function authenticate(request: Request): Promise<AuthUser> {
     email: decoded.email,
     displayName: decoded.name as string | undefined,
   };
+}
+
+/** For actions that involve other people or outside accounts; guests are refused. */
+export function requireFullAccount(user: AuthUser, action: string): void {
+  if (user.guest) {
+    throw new HttpError(403, `Create an account to ${action}.`);
+  }
 }
 
 export type ResolvedScope = {

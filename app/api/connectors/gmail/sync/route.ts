@@ -6,7 +6,12 @@ import {
 } from "@/lib/store";
 import type { EmailImport, IngestionJob } from "@/lib/types";
 import { maskSensitiveData } from "@/lib/masking";
-import { authorize, errorResponse, workspaceIdFrom } from "@/lib/auth";
+import {
+  authorize,
+  errorResponse,
+  requireFullAccount,
+  workspaceIdFrom,
+} from "@/lib/auth";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
@@ -19,6 +24,7 @@ export async function POST(request: Request) {
       request,
       workspaceIdFrom(request, body),
     );
+    requireFullAccount(user, "import from Gmail");
     const accessToken = body.accessToken;
 
     if (!accessToken) {

@@ -7,9 +7,11 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useRouter } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  signInAnonymously,
   signInWithEmailAndPassword,
   signOut as fbSignOut,
   updateProfile,
@@ -23,6 +25,10 @@ export type WorkspaceSummary = Workspace & { role: MemberRole };
 type SessionValue = {
   user: User | null;
   loading: boolean;
+  /** True for an anonymous demo session. */
+  guest: boolean;
+  /** Set while a demo workspace is being prepared, before it is usable. */
+  preparingDemo: boolean;
   configured: boolean;
   workspaces: WorkspaceSummary[];
   activeWorkspace: WorkspaceSummary | null;
@@ -31,6 +37,11 @@ type SessionValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Sign in as an anonymous guest, load the demo guide into the guest's own
+   * personal workspace, then open the chat.
+   */
+  startDemo: () => Promise<void>;
   /** fetch() with the ID token and active workspace attached. */
   apiFetch: (input: string, init?: RequestInit) => Promise<Response>;
 };
@@ -51,6 +62,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(configured);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [activeId, setActiveId] = useState<string>("");
+  const [preparingDemo, setPreparingDemo] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (!configured) return;
@@ -168,6 +181,41 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     await fbSignOut(clientAuth());
   }, []);
 
+  const startDemo = useCallback(async () => {
+    setPreparingDemo(true);
+    try {
+      const { user: guest } = await signInAnonymously(clientAuth());
+      const token = await guest.getIdToken();
+      const headers = { authorization: `Bearer ${token}` };
+
+      // Listing workspaces creates the guest's personal one on first call.
+      const listed = await fetch("/api/workspaces", { headers, cache: "no-store" });
+      if (!listed.ok) throw new Error("Could not open a demo workspace.");
+      const { workspaces: mine } = (await listed.json()) as {
+        workspaces: WorkspaceSummary[];
+      };
+      const personal = mine.find((w) => w.type === "personal") ?? mine[0];
+      if (!personal) throw new Error("Could not open a demo workspace.");
+
+      const seeded = await fetch("/api/demo/seed", {
+        method: "POST",
+        headers: { ...headers, "x-workspace-id": personal.id },
+        cache: "no-store",
+      });
+      if (!seeded.ok) throw new Error("Could not load the demo documents.");
+
+      setWorkspaces(mine);
+      setActiveId(personal.id);
+      router.push("/chat");
+    } catch (error) {
+      // Leave no half-made guest session behind a failed setup.
+      await fbSignOut(clientAuth()).catch(() => undefined);
+      throw error;
+    } finally {
+      setPreparingDemo(false);
+    }
+  }, [router]);
+
   const activeWorkspace = useMemo(
     () => workspaces.find((w) => w.id === activeId) ?? null,
     [workspaces, activeId],
@@ -177,6 +225,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       loading,
+      guest: Boolean(user?.isAnonymous),
+      preparingDemo,
       configured,
       workspaces,
       activeWorkspace,
@@ -185,11 +235,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       signIn,
       signUp,
       signOut,
+      startDemo,
       apiFetch,
     }),
     [
       user,
       loading,
+      preparingDemo,
       configured,
       workspaces,
       activeWorkspace,
@@ -198,6 +250,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       signIn,
       signUp,
       signOut,
+      startDemo,
       apiFetch,
     ],
   );
