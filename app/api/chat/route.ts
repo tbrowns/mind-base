@@ -1,7 +1,8 @@
 import { generateAnswer, selectContexts } from "@/lib/ai";
 import type { ConversationTurn } from "@/lib/ai";
 import { searchDocuments } from "@/lib/retrieval";
-import { listChatsFor, saveChat } from "@/lib/store";
+import { listChatsFor, listDocuments, saveChat } from "@/lib/store";
+import { pickSuggestions } from "@/lib/suggestions";
 import { authorize, errorResponse, workspaceIdFrom } from "@/lib/auth";
 import { conversationIdOf } from "@/lib/types";
 import type { AccessScope, ChatRecord, ViewerRole } from "@/lib/types";
@@ -117,13 +118,21 @@ export async function POST(request: Request) {
   }
 }
 
-/** A user's own conversation history. There is no variant of this for admins. */
+/**
+ * A user's own conversation history, plus suggested questions from documents
+ * they can read. There is no variant of this for admins.
+ */
 export async function GET(request: Request) {
   try {
     const { scope } = await authorize(request, workspaceIdFrom(request));
-    // Enough turns to rebuild recent conversations whole; the client groups them.
-    const chats = await listChatsFor(scope.workspaceId, scope.userId, 300);
-    return Response.json({ chats });
+    const [chats, documents] = await Promise.all([
+      // Enough turns to rebuild recent conversations whole; the client groups them.
+      listChatsFor(scope.workspaceId, scope.userId, 300),
+      listDocuments(scope.workspaceId),
+    ]);
+    // Filtered to documents this user may read: a question reveals content.
+    const suggestions = pickSuggestions(scope, documents);
+    return Response.json({ chats, suggestions });
   } catch (error) {
     return errorResponse(error);
   }

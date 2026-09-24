@@ -1,10 +1,12 @@
 "use client";
+import Link from "next/link";
 import {
   ArrowUp,
   BookOpen,
   BrainCircuit,
   ChevronRight,
   Clock3,
+  FilePlus2,
   FileSearch,
   Plus,
   Sparkles,
@@ -19,14 +21,8 @@ import {
 import { Badge, Spinner } from "@/components/ui";
 import type { ChatRecord, Source } from "@/lib/types";
 import { accessLabels, conversationIdOf } from "@/lib/types";
+import { unaskedSuggestions } from "@/lib/suggestions";
 
-const suggestions = [
-  "What is required for Stage 1?",
-  "Which bounties are listed in the demo guide?",
-  "What does Mindbase need to deliver?",
-  "What are the intellectual property rules?",
-  "When is the final MiniHack event?",
-];
 
 /** Pull the server's `{error}` text out of a failed response, with a fallback. */
 async function readError(response: Response, fallback: string) {
@@ -73,9 +69,13 @@ export default function ChatPage() {
  * The model marks emphasis with **double asterisks**. Only that is rendered;
  * anything else in the answer stays plain text, so model output can never
  * inject markup.
+ *
+ * Some models cite as 【1】 or 【1†L3-L5】 rather than the [1] the prompt asks
+ * for; those are shown as [1] so they match the numbered source cards.
  */
 function renderAnswer(answer: string) {
-  return answer.split(/(\*\*[^*\n]+\*\*)/g).map((part, index) =>
+  const text = answer.replace(/【(\d+)[^】]*】/g, "[$1]");
+  return text.split(/(\*\*[^*\n]+\*\*)/g).map((part, index) =>
     /^\*\*[^*\n]+\*\*$/.test(part) ? (
       <strong key={index} className="font-bold text-[#10231e]">
         {part.slice(2, -2)}
@@ -156,6 +156,8 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   );
   const [messages, setMessages] = useState<ChatRecord[]>([]);
   const [recent, setRecent] = useState<ChatRecord[]>([]);
+  // null until loaded; [] means the user can read no documents yet.
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [source, setSource] = useState<DocumentSource>();
@@ -164,6 +166,12 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   const bottom = useRef<HTMLDivElement>(null);
 
   const conversations = groupConversations(recent);
+  const shownSuggestions = suggestions
+    ? unaskedSuggestions(
+        suggestions,
+        recent.map((chat) => chat.question),
+      )
+    : [];
 
   useEffect(() => {
     let cancelled = false;
@@ -175,10 +183,15 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
             await readError(response, "Could not load your conversations."),
           );
         }
-        return (await response.json()) as { chats?: ChatRecord[] };
+        return (await response.json()) as {
+          chats?: ChatRecord[];
+          suggestions?: string[];
+        };
       })
       .then((data) => {
-        if (!cancelled) setRecent(data.chats ?? []);
+        if (cancelled) return;
+        setRecent(data.chats ?? []);
+        setSuggestions(data.suggestions ?? []);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -199,7 +212,10 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   // scrollIntoView, and an expression body would hand that to React as the
   // effect's cleanup -- which it then calls, crashing the page on the next
   // message or on navigating away.
+  // Nothing to follow on an empty conversation, and scrolling there pushed the
+  // welcome heading under the header on shorter screens.
   useEffect(() => {
+    if (!messages.length && !loading) return;
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
@@ -415,21 +431,32 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
                   Mindbase searches your library, filters for relevance, then
                   answers only from the documents it cites.
                 </p>
-                <div className="mx-auto mt-7 grid max-w-2xl gap-2 sm:grid-cols-2">
-                  {suggestions.map((item, index) => (
-                    <button
-                      key={item}
-                      onClick={() => ask(item)}
-                      className={`group flex items-center justify-between rounded-2xl border border-[#d9e9e2] bg-white/88 px-4 py-3 text-left text-xs font-bold text-[#344a42] shadow-sm hover:border-[#8adbc8] hover:bg-[#fafffd] ${index === suggestions.length - 1 ? "sm:col-span-2" : ""}`}
-                    >
-                      {item}
-                      <ChevronRight
-                        size={14}
-                        className="text-[#7f928a] group-hover:text-[#0a8068]"
-                      />
-                    </button>
-                  ))}
-                </div>
+                {shownSuggestions.length > 0 && (
+                  <div className="mx-auto mt-7 grid max-w-2xl gap-2 sm:grid-cols-2">
+                    {shownSuggestions.map((item, index) => (
+                      <button
+                        key={item}
+                        onClick={() => ask(item)}
+                        className={`group flex items-center justify-between gap-3 rounded-2xl border border-[#d9e9e2] bg-white/88 px-4 py-3 text-left text-xs font-bold text-[#344a42] shadow-sm hover:border-[#8adbc8] hover:bg-[#fafffd] ${shownSuggestions.length % 2 === 1 && index === shownSuggestions.length - 1 ? "sm:col-span-2" : ""}`}
+                      >
+                        {item}
+                        <ChevronRight
+                          size={14}
+                          className="shrink-0 text-[#7f928a] group-hover:text-[#0a8068]"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {suggestions?.length === 0 && (
+                  <Link
+                    href="/documents/new"
+                    className="mx-auto mt-7 inline-flex items-center gap-2 rounded-2xl border border-[#d9e9e2] bg-white/88 px-4 py-3 text-xs font-bold text-[#0a3f37] shadow-sm hover:border-[#8adbc8]"
+                  >
+                    <FilePlus2 size={15} />
+                    Add a document to start asking questions
+                  </Link>
+                )}
               </div>
             )}
 

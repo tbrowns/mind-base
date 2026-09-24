@@ -14,3 +14,11 @@ Builders retain ownership of original code they create. Kuzana receives a non-ex
 
 Judging, prizes, and events
 Entries are judged on usefulness, technical execution, product clarity, responsible data handling, and demo quality. Finalists present at the Kuzana MiniHack event on 5 July 2026 in Nairobi. Final prizes are announced and awarded at the closing session after finalist demonstrations. Judges may withhold an award if no submission meets the working-product threshold.`;
+
+/** Hand-written for the guide above, so the demo needs no generation call. */
+export const demoQuestions = [
+  "What is required for Stage 1?",
+  "Which bounties are listed in the demo guide?",
+  "What does Mindbase need to deliver?",
+  "When is the final MiniHack event?",
+];

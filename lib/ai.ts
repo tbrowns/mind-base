@@ -1,5 +1,6 @@
 import "server-only";
 import Groq from "groq-sdk";
+import { parseSuggestedQuestions } from "./suggestions";
 
 const FALLBACK_ANSWER = "I could not find that in the uploaded documents.";
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
@@ -148,4 +149,48 @@ ${buildContextBlock(usableContexts)}`;
 
   const answer = cleanText(response.choices[0]?.message?.content);
   return answer || FALLBACK_ANSWER;
+}
+
+/** Enough of a document to find its main topics without a long, slow prompt. */
+const SUGGESTION_SAMPLE_CHARS = 6000;
+
+/**
+ * Questions this document can answer, for the chat to offer as starting
+ * points. Pass masked text: the questions are shown to everyone who can read
+ * the document. The caller treats any failure as "no suggestions" -- an upload
+ * must never fail because this did.
+ */
+export async function suggestQuestions(
+  title: string,
+  text: string,
+): Promise<string[]> {
+  const sample = cleanText(text).slice(0, SUGGESTION_SAMPLE_CHARS);
+  if (!sample) return [];
+
+  const prompt = `Suggest questions a colleague could ask that this document answers.
+
+Rules:
+- Write exactly 4 questions, each under 90 characters.
+- Each must be answerable from the document alone.
+- Ask about the substance -- rules, dates, amounts, steps, decisions -- not about the document itself.
+- Never mention people's names, contact details, or anything written as [masked ...].
+- Reply with JSON only, in this shape: {"questions": ["...", "...", "...", "..."]}
+
+TITLE: ${cleanText(title) || "Untitled document"}
+
+DOCUMENT:
+${sample}`;
+
+  const response = await getGroq().chat.completions.create(
+    {
+      messages: [{ role: "user", content: prompt }],
+      model: process.env.GROQ_MODEL || DEFAULT_GROQ_MODEL,
+      temperature: 0.3,
+    },
+    // Runs alongside the vector upsert, so a slow reply costs little; a hung
+    // one must not hold the upload open.
+    { timeout: 20_000, maxRetries: 1 },
+  );
+
+  return parseSuggestedQuestions(response.choices[0]?.message?.content ?? "");
 }

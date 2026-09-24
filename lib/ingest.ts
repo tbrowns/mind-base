@@ -1,6 +1,8 @@
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { addDocuments } from "./vectorstore";
 import { saveDocument } from "./store";
+import { maskSensitiveData } from "./masking";
+import { suggestQuestions } from "./ai";
 import type { AccessLevel, DocVisibility, DocumentRecord } from "./types";
 
 export async function ingestDocument(input: {
@@ -17,6 +19,8 @@ export async function ingestDocument(input: {
   fileType?: string;
   sourceType?: "manual" | "gmail" | "meeting";
   metadata?: Record<string, unknown>;
+  /** Curated questions (the demo guide); skips generating them. */
+  suggestedQuestions?: string[];
 }) {
   if (!input.title.trim()) throw new Error("Please add a document title.");
   if (!input.text.trim())
@@ -31,7 +35,11 @@ export async function ingestDocument(input: {
     chunkOverlap: 200,
   });
 
-  const chunks = await splitter.splitText(input.text);
+  // Masked here, once, for every route in: manual uploads used to reach the
+  // vector store unmasked although the upload page promised otherwise. Mail
+  // and meeting imports arrive already masked, and masking is idempotent.
+  const text = maskSensitiveData(input.text);
+  const chunks = await splitter.splitText(text);
 
   const chunkIds = chunks.map((_, i) => `${id}-chunk-${i}`);
 
@@ -52,8 +60,16 @@ export async function ingestDocument(input: {
     ...input.metadata,
   }));
 
-  // Add documents to Pinecone vector store
-  await addDocuments(input.workspaceId, docs);
+  // Questions are generated alongside the upsert, which takes a few seconds
+  // anyway, so they add little to the wait.
+  const [, suggestedQuestions] = await Promise.all([
+    addDocuments(input.workspaceId, docs),
+    input.suggestedQuestions ??
+      suggestQuestions(input.title, text).catch((error: unknown) => {
+        console.warn("Could not suggest questions for a document", error);
+        return [];
+      }),
+  ]);
 
   // Create document record for metadata storage
   const document: DocumentRecord = {
@@ -70,6 +86,7 @@ export async function ingestDocument(input: {
     uploadedAt: createdAt,
     status: "ready",
     chunkCount: chunks.length,
+    suggestedQuestions,
     sourceType: input.sourceType ?? "manual",
     metadata: {
       ...input.metadata,

@@ -29,6 +29,11 @@ export type DocumentRecord = {
   chunkCount: number;
   sourceType?: "manual" | "gmail" | "meeting";
   metadata?: Record<string, unknown>;
+  /**
+   * Questions this document can answer, generated from its masked text at
+   * upload. Absent on documents stored before suggestions existed.
+   */
+  suggestedQuestions?: string[];
 };
 
 export type IngestionStatus =

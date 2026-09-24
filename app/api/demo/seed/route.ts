@@ -1,4 +1,4 @@
-import { demoText } from "@/lib/demo";
+import { demoQuestions, demoText } from "@/lib/demo";
 import { ingestDocument } from "@/lib/ingest";
 import { listDocuments } from "@/lib/store";
 import { authorize, errorResponse, workspaceIdFrom } from "@/lib/auth";
@@ -25,6 +25,7 @@ export async function POST(request: Request) {
       accessLevel: "all-team",
       fileName: "mindbase-demo-guide.txt",
       fileType: "text/plain",
+      suggestedQuestions: demoQuestions,
     });
     return Response.json({ document }, { status: 201 });
   } catch (error) {
