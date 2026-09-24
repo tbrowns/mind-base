@@ -39,10 +39,12 @@ const RULES: Array<{ pattern: RegExp; replace: string | ((m: string) => string) 
   { pattern: /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, replace: "[masked email]" },
   // KRA PIN: letter, nine digits, letter.
   { pattern: /\b[A-Z]\d{9}[A-Z]\b/g, replace: "[masked KRA PIN]" },
-  // An ID or passport number that announced itself with a label.
+  // An ID or passport number that announced itself with a label. The value
+  // must contain a digit: the label is matched case-insensitively, and without
+  // that, prose such as "the id field" or "Firebase ID tokens" was masked.
   {
     pattern:
-      /\b(?:ID|National ID|Passport)(?:\s*(?:No\.?|Number|#))?\s*[:\-]?\s*[A-Z0-9-]{5,}\b/gi,
+      /\b(?:ID|National ID|Passport)(?:\s*(?:No\.?|Number|#))?\s*[:\-]?\s*(?=[A-Z0-9-]*\d)[A-Z0-9-]{5,}\b/gi,
     replace: "[masked ID number]",
   },
   // International form: +254 712 345 678, +1 (415) 555-2671. Must end on a

@@ -19,6 +19,19 @@ describe("maskSensitiveData", () => {
 
   it("masks ID and passport numbers", () => {
     expect(maskSensitiveData("National ID No. 29384756")).toContain("[masked ID number]");
+    expect(maskSensitiveData("Passport No: AK0123456")).toBe("[masked ID number]");
+    expect(maskSensitiveData("national id: 29384756")).toBe("[masked ID number]");
+  });
+
+  // Found on a real document: every match of the old rule there was prose.
+  it("leaves the word id alone when no number follows it", () => {
+    for (const text of [
+      "Firebase ID tokens expire hourly.",
+      "Set the id field on each record.",
+      "Each Id matches exactly one workspace.",
+    ]) {
+      expect(maskSensitiveData(text)).toBe(text);
+    }
   });
 
   /*
