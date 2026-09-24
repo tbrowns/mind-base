@@ -2,7 +2,7 @@ import "server-only";
 import Groq from "groq-sdk";
 import { parseSuggestedQuestions } from "./suggestions";
 
-const FALLBACK_ANSWER = "I could not find that in the uploaded documents.";
+export const FALLBACK_ANSWER = "I could not find that in the uploaded documents.";
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 const MAX_CONTEXT_CHUNKS = 8;
 const MAX_MEMORY_TURNS = 5;
@@ -101,21 +101,31 @@ function buildMemoryBlock(history: ConversationTurn[] = []) {
     .join("\n\n");
 }
 
-export async function generateAnswer(
+/**
+ * The answer, yielded piece by piece as the model writes it, so the chat can
+ * show text within a second or two instead of after the whole reply.
+ *
+ * With nothing usable to answer from, it yields the fixed fallback without
+ * calling the model. `signal` stops generation when the reader goes away.
+ */
+export async function* streamAnswer(
   question: string,
   contexts: AnswerContext[],
   history: ConversationTurn[] = [],
-) {
+  signal?: AbortSignal,
+): AsyncGenerator<string> {
   const normalizedQuestion = cleanText(question);
 
   if (!normalizedQuestion) {
-    return "Please ask a question first.";
+    yield "Please ask a question first.";
+    return;
   }
 
   const usableContexts = selectContexts(contexts);
 
   if (!usableContexts.length) {
-    return FALLBACK_ANSWER;
+    yield FALLBACK_ANSWER;
+    return;
   }
 
   const memoryBlock = buildMemoryBlock(history);
@@ -136,19 +146,25 @@ ${normalizedQuestion}
 CONTEXT:
 ${buildContextBlock(usableContexts)}`;
 
-  const response = await getGroq().chat.completions.create({
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-    model: process.env.GROQ_MODEL || DEFAULT_GROQ_MODEL,
-    temperature: 0.2,
-  });
+  const stream = await getGroq().chat.completions.create(
+    {
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      model: process.env.GROQ_MODEL || DEFAULT_GROQ_MODEL,
+      temperature: 0.2,
+      stream: true,
+    },
+    { signal },
+  );
 
-  const answer = cleanText(response.choices[0]?.message?.content);
-  return answer || FALLBACK_ANSWER;
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) yield delta;
+  }
 }
 
 /** Enough of a document to find its main topics without a long, slow prompt. */

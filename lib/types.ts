@@ -144,6 +144,12 @@ export type ChatRecord = {
   createdAt: string;
 };
 
+/** One line of the streamed reply from POST /api/chat. */
+export type ChatStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; chat: ChatRecord }
+  | { type: "error"; error: string };
+
 export function conversationIdOf(chat: Pick<ChatRecord, "id" | "conversationId">) {
   return chat.conversationId || chat.id;
 }

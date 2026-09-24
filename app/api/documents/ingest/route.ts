@@ -1,6 +1,7 @@
 import { ingestDocument } from "@/lib/ingest";
 import { authorize, errorResponse, HttpError, workspaceIdFrom } from "@/lib/auth";
 import { checkFileAllowed } from "@/lib/authz";
+import { consumeGuestQuota, GUEST_MAX_UPLOAD_CHARS } from "@/lib/quota";
 import { ACCESS_LEVEL_ORDER } from "@/lib/types";
 import type { AccessLevel, DocVisibility } from "@/lib/types";
 
@@ -42,6 +43,16 @@ export async function POST(request: Request) {
     const visibility: DocVisibility =
       body.visibility === "private" ? "private" : "shared";
 
+    const text = typeof body.text === "string" ? body.text : "";
+    if (user.guest && text.length > GUEST_MAX_UPLOAD_CHARS) {
+      throw new HttpError(
+        413,
+        "Demo uploads are limited to about fifteen pages. Create an account for longer documents.",
+      );
+    }
+    // Last, so a request refused above does not use up an upload.
+    await consumeGuestQuota(user, "uploads");
+
     const document = await ingestDocument({
       workspaceId: scope.workspaceId,
       ownerId: scope.userId,
@@ -50,7 +61,7 @@ export async function POST(request: Request) {
       title: typeof body.title === "string" ? body.title : "",
       description:
         typeof body.description === "string" ? body.description : undefined,
-      text: typeof body.text === "string" ? body.text : "",
+      text,
       accessLevel,
       fileName,
       fileType: typeof body.fileType === "string" ? body.fileType : undefined,

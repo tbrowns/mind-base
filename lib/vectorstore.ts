@@ -106,6 +106,50 @@ export async function deleteDocumentVectors(
 }
 
 /**
+ * A document's stored chunks in reading order. The vector store is the only
+ * place a document's text lives, so this is how a whole document is read.
+ */
+export async function fetchDocumentChunks(
+  workspaceId: string,
+  chunkIds: string[],
+): Promise<Array<{ id: string; chunkIndex: number; text: string }>> {
+  if (!chunkIds.length) return [];
+  const ns = await namespaceFor(workspaceId);
+  const chunks: Array<{ id: string; chunkIndex: number; text: string }> = [];
+  // Fetch accepts a bounded number of ids per request.
+  for (let i = 0; i < chunkIds.length; i += 100) {
+    const { records } = await ns.fetch(chunkIds.slice(i, i + 100));
+    for (const [id, record] of Object.entries(records ?? {})) {
+      const fields = (record.metadata ?? {}) as ChunkMetadata & {
+        chunk_text?: string;
+      };
+      chunks.push({
+        id,
+        chunkIndex: Number(fields.chunkIndex ?? 0),
+        text: String(fields.chunk_text ?? fields.text ?? ""),
+      });
+    }
+  }
+  return chunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+}
+
+/**
+ * Drop every vector a workspace owns. Its namespace holds nothing else, so
+ * this is exact. A namespace that was never written to does not exist, which
+ * for a delete is the same as success.
+ */
+export async function deleteWorkspaceVectors(workspaceId: string) {
+  const ns = await namespaceFor(workspaceId);
+  try {
+    await ns.deleteAll();
+  } catch (error) {
+    if (!(error instanceof Error && /not ?found|404/i.test(error.message))) {
+      throw error;
+    }
+  }
+}
+
+/**
  * Rewrite metadata fields on existing records without re-embedding them.
  * Pinecone merges the given fields into what is stored, so the chunk text and
  * everything else on the record is left alone.

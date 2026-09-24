@@ -1,11 +1,17 @@
-import { generateAnswer, selectContexts } from "@/lib/ai";
+import { FALLBACK_ANSWER, selectContexts, streamAnswer } from "@/lib/ai";
 import type { ConversationTurn } from "@/lib/ai";
 import { searchDocuments } from "@/lib/retrieval";
 import { listChatsFor, listDocuments, saveChat } from "@/lib/store";
 import { pickSuggestions } from "@/lib/suggestions";
 import { authorize, errorResponse, workspaceIdFrom } from "@/lib/auth";
+import { consumeGuestQuota } from "@/lib/quota";
 import { conversationIdOf } from "@/lib/types";
-import type { AccessScope, ChatRecord, ViewerRole } from "@/lib/types";
+import type {
+  AccessScope,
+  ChatRecord,
+  ChatStreamEvent,
+  ViewerRole,
+} from "@/lib/types";
 
 /**
  * Two things used to be wrong here and both are fixed by deriving rather than
@@ -63,12 +69,16 @@ export async function POST(request: Request) {
       conversationId?: unknown;
     };
 
-    const { scope } = await authorize(request, workspaceIdFrom(request, body));
+    const { scope, user } = await authorize(
+      request,
+      workspaceIdFrom(request, body),
+    );
 
     const cleanQuestion = body.question?.trim() ?? "";
     if (!cleanQuestion) {
       return Response.json({ error: "Ask a question first." }, { status: 400 });
     }
+    await consumeGuestQuota(user, "questions");
 
     const conversationId = conversationIdFrom(body.conversationId);
     const requestHistory = cleanHistory(body.history);
@@ -87,32 +97,88 @@ export async function POST(request: Request) {
             .reverse()
             .map(({ question, answer }) => ({ question, answer }));
 
-    const answer = await generateAnswer(cleanQuestion, used, remembered);
+    const sources = used.map((chunk) => ({
+      id: chunk.id,
+      documentId: chunk.documentId,
+      documentTitle: chunk.documentTitle,
+      visibility: chunk.visibility,
+      chunkIndex: chunk.chunkIndex,
+      accessLevel: chunk.accessLevel,
+      preview: chunk.maskedText.slice(0, 190),
+      text: chunk.maskedText,
+      score: chunk.relevanceScore ?? chunk.score ?? 0,
+    }));
 
-    const chat: ChatRecord = {
-      id: crypto.randomUUID(),
-      workspaceId: scope.workspaceId,
-      userId: scope.userId,
-      conversationId,
-      question: cleanQuestion,
-      answer,
-      sources: used.map((chunk) => ({
-        id: chunk.id,
-        documentId: chunk.documentId,
-        documentTitle: chunk.documentTitle,
-        visibility: chunk.visibility,
-        chunkIndex: chunk.chunkIndex,
-        accessLevel: chunk.accessLevel,
-        preview: chunk.maskedText.slice(0, 190),
-        text: chunk.maskedText,
-        score: chunk.relevanceScore ?? chunk.score ?? 0,
-      })),
-      viewerRole: viewerRoleFor(scope),
-      createdAt: new Date().toISOString(),
-    };
+    // Everything that can be refused has been by now, as a normal status
+    // code. From here the reply is a stream of JSON lines: "delta" events
+    // carrying text as the model writes it, then one "done" carrying the
+    // saved chat, or one "error".
+    const encoder = new TextEncoder();
+    const abort = new AbortController();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: ChatStreamEvent) => {
+          try {
+            controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          } catch {
+            // The reader has gone; cancel() has already stopped generation.
+          }
+        };
+        try {
+          let answer = "";
+          for await (const delta of streamAnswer(
+            cleanQuestion,
+            used,
+            remembered,
+            abort.signal,
+          )) {
+            answer += delta;
+            send({ type: "delta", text: delta });
+          }
 
-    await saveChat(chat);
-    return Response.json(chat);
+          const chat: ChatRecord = {
+            id: crypto.randomUUID(),
+            workspaceId: scope.workspaceId,
+            userId: scope.userId,
+            conversationId,
+            question: cleanQuestion,
+            answer: answer.trim() || FALLBACK_ANSWER,
+            sources,
+            viewerRole: viewerRoleFor(scope),
+            createdAt: new Date().toISOString(),
+          };
+          await saveChat(chat);
+          send({ type: "done", chat });
+        } catch (error) {
+          if (!abort.signal.aborted) {
+            console.error("Chat answer failed", error);
+            send({
+              type: "error",
+              error: "Mindbase could not finish that answer. Try asking again.",
+            });
+          }
+        } finally {
+          try {
+            controller.close();
+          } catch {
+            // Already closed by a cancelled reader.
+          }
+        }
+      },
+      // The user left mid-answer: stop the model rather than pay for the rest.
+      cancel() {
+        abort.abort();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "cache-control": "no-store, no-transform",
+        // Proxies that buffer would hold every delta until the end.
+        "x-accel-buffering": "no",
+      },
+    });
   } catch (error) {
     return errorResponse(error);
   }

@@ -190,6 +190,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <p>
               <span className="font-black">Demo workspace.</span> It&apos;s
               private to this browser and is gone once you leave the demo.
+              Guests can ask 25 questions and upload 5 documents.
             </p>
             <button
               onClick={() => void signOut()}

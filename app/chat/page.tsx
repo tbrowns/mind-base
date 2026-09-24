@@ -13,16 +13,17 @@ import {
   Trash2,
   X,
 } from "@/components/icons";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   useSession,
   type WorkspaceSummary,
 } from "@/components/session-context";
 import { Badge, Spinner } from "@/components/ui";
-import type { ChatRecord, Source } from "@/lib/types";
+import type { ChatRecord, ChatStreamEvent, Source } from "@/lib/types";
 import { accessLabels, conversationIdOf } from "@/lib/types";
 import { unaskedSuggestions } from "@/lib/suggestions";
-
+import { readNdjson } from "@/lib/client/ndjson";
+import { passageRanges } from "@/lib/chunks";
 
 /** Pull the server's `{error}` text out of a failed response, with a fallback. */
 async function readError(response: Response, fallback: string) {
@@ -163,7 +164,18 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   const [source, setSource] = useState<DocumentSource>();
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState<string>();
+  // The question being answered, and the answer so far as it streams in.
+  const [pending, setPending] = useState<{
+    question: string;
+    answer: string;
+  } | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const inflight = useRef<AbortController | null>(null);
+
+  // Leaving the page (or switching workspace, which remounts this) cancels an
+  // answer in progress, and the server stops generating it.
+  useEffect(() => () => inflight.current?.abort(), []);
 
   const conversations = groupConversations(recent);
   const shownSuggestions = suggestions
@@ -213,11 +225,25 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
   // effect's cleanup -- which it then calls, crashing the page on the next
   // message or on navigating away.
   // Nothing to follow on an empty conversation, and scrolling there pushed the
-  // welcome heading under the header on shorter screens.
+  // welcome heading under the header on shorter screens. While an answer
+  // streams, follow it only if the reader is already at the bottom: someone
+  // who scrolled up to reread is left where they are.
   useEffect(() => {
-    if (!messages.length && !loading) return;
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+    if (!messages.length && !pending) return;
+    const streaming = Boolean(pending?.answer);
+    const view = scroller.current;
+    if (
+      streaming &&
+      view &&
+      view.scrollHeight - view.scrollTop - view.clientHeight > 160
+    ) {
+      return;
+    }
+    bottom.current?.scrollIntoView({
+      behavior: streaming ? "auto" : "smooth",
+      block: "end",
+    });
+  }, [messages, pending]);
 
   function startNew() {
     if (loading) return;
@@ -250,6 +276,10 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
     setQuestion("");
     setError("");
     setLoading(true);
+    setPending({ question: cleanQuestion, answer: "" });
+
+    const controller = new AbortController();
+    inflight.current = controller;
 
     try {
       const response = await apiFetch("/api/chat", {
@@ -259,6 +289,7 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
           history,
           conversationId,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -267,18 +298,38 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
         );
       }
 
-      const data = (await response.json()) as ChatRecord;
+      // A holder object, because TypeScript does not see assignments made
+      // inside the callback and would treat a plain variable as still null.
+      const result: { chat?: ChatRecord } = {};
+      await readNdjson<ChatStreamEvent>(response, (event) => {
+        if (event.type === "delta") {
+          setPending((current) =>
+            current && { ...current, answer: current.answer + event.text },
+          );
+        } else if (event.type === "done") {
+          result.chat = event.chat;
+        } else {
+          throw new Error(event.error);
+        }
+      });
+      const saved = result.chat;
+      if (!saved) throw new Error("The answer was cut off. Try asking again.");
 
-      setMessages((items) => [...items, data]);
+      setMessages((items) => [...items, saved]);
       setRecent((items) => [
-        data,
-        ...items.filter((item) => item.id !== data.id),
+        saved,
+        ...items.filter((item) => item.id !== saved.id),
       ]);
     } catch (err) {
+      if (controller.signal.aborted) return;
+      // Give the question back, e.g. after the demo limit refused it.
+      setQuestion((current) => current || cleanQuestion);
       setError(
         err instanceof Error ? err.message : "Could not answer that question.",
       );
     } finally {
+      if (inflight.current === controller) inflight.current = null;
+      setPending(null);
       setLoading(false);
     }
   }
@@ -417,7 +468,10 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
           )}
         </header>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-36 pt-8 md:px-8">
+        <div
+          ref={scroller}
+          className="flex-1 overflow-y-auto px-4 pb-36 pt-8 md:px-8"
+        >
           <div className="mx-auto max-w-3xl">
             {!messages.length && (
               <div className="pt-4 text-center md:pt-12">
@@ -515,18 +569,35 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
               );
             })}
 
-            {loading && (
-              <div className="flex gap-3 animate-rise">
-                <span className="grid size-9 place-items-center rounded-2xl bg-[#dff8ef] text-[#08735f]">
-                  <BrainCircuit size={17} />
-                </span>
-                <div className="rounded-2xl border border-[#d9e9e2] bg-white/88 px-4 py-3 shadow-sm">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-[#5f746b]">
-                    <Spinner size={15} />
-                    Screening sources and composing an answer...
-                  </div>
+            {pending && (
+              <article className="mb-10 animate-rise" aria-busy="true">
+                <div className="ml-auto max-w-[82%] rounded-[22px] rounded-br-md bg-[#0a3f37] px-4 py-3 text-sm font-medium leading-6 text-white shadow-[0_12px_24px_rgba(10,63,55,.12)]">
+                  {pending.question}
                 </div>
-              </div>
+                <div className="mt-5 flex gap-3">
+                  <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-2xl bg-[#dff8ef] text-[#08735f]">
+                    <BrainCircuit size={17} />
+                  </span>
+                  {pending.answer ? (
+                    <div className="min-w-0 flex-1">
+                      <div className="whitespace-pre-wrap rounded-[22px] border border-[#d9e9e2] bg-white/88 px-5 py-4 text-sm leading-7 text-[#24372f] shadow-sm">
+                        {renderAnswer(pending.answer.trimStart())}
+                        <span
+                          aria-hidden="true"
+                          className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-[#0aa37f]"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-[#d9e9e2] bg-white/88 px-4 py-3 shadow-sm">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-[#5f746b]">
+                        <Spinner size={15} />
+                        Screening sources and composing an answer...
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </article>
             )}
 
             {error && (
@@ -578,35 +649,139 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
       </section>
 
       {source && (
-        <>
+        <SourceDrawer
+          key={source.documentId || source.documentTitle}
+          source={source}
+          onClose={() => setSource(undefined)}
+        />
+      )}
+    </div>
+  );
+}
+
+type FullDocument =
+  | { status: "idle" | "loading" }
+  | { status: "ready"; text: string }
+  | { status: "error"; error: string };
+
+/**
+ * A cited document: the passages the answer drew on, or the whole document
+ * with those passages highlighted. The whole text is fetched only when asked
+ * for, and only if the user could have retrieved the document in chat.
+ */
+function SourceDrawer({
+  source,
+  onClose,
+}: {
+  source: DocumentSource;
+  onClose: () => void;
+}) {
+  const { apiFetch } = useSession();
+  const [view, setView] = useState<"passages" | "document">("passages");
+  const [full, setFull] = useState<FullDocument>({ status: "idle" });
+  const firstMark = useRef<HTMLElement>(null);
+
+  async function showDocument() {
+    setView("document");
+    if (full.status === "ready" || full.status === "loading") return;
+    setFull({ status: "loading" });
+    try {
+      const response = await apiFetch(
+        `/api/documents/${encodeURIComponent(source.documentId)}/content`,
+      );
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? "This document is no longer in the library."
+            : await readError(response, "Could not open the document."),
+        );
+      }
+      const data = (await response.json()) as { text?: string };
+      setFull({ status: "ready", text: data.text ?? "" });
+    } catch (err) {
+      setFull({
+        status: "error",
+        error:
+          err instanceof Error ? err.message : "Could not open the document.",
+      });
+    }
+  }
+
+  // Open the document at the first passage the answer used.
+  useEffect(() => {
+    if (view === "document" && full.status === "ready") {
+      firstMark.current?.scrollIntoView({ block: "center" });
+    }
+  }, [view, full.status]);
+
+  const tab = (active: boolean) =>
+    `rounded-lg px-3 py-1.5 text-[11px] font-black transition ${
+      active
+        ? "bg-white text-[#0a3f37] shadow-sm"
+        : "text-[#587067] hover:text-[#0a3f37]"
+    }`;
+
+  return (
+    <>
+      <button
+        aria-label="Close source"
+        className="fixed inset-0 z-40 bg-[#071512]/35 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      <aside
+        className={`fixed inset-y-0 right-0 z-50 w-full overflow-y-auto bg-[#fbfffd] p-6 shadow-2xl animate-rise ${
+          view === "document" ? "max-w-2xl" : "max-w-lg"
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase text-[#08735f]">
+            <FileSearch size={15} />
+            Source
+          </div>
           <button
+            onClick={onClose}
             aria-label="Close source"
-            className="fixed inset-0 z-40 bg-[#071512]/35 backdrop-blur-[2px]"
-            onClick={() => setSource(undefined)}
-          />
-          <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-lg overflow-y-auto bg-[#fbfffd] p-6 shadow-2xl animate-rise">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-[10px] font-black uppercase text-[#08735f]">
-                <FileSearch size={15} />
-                Source
-              </div>
-              <button
-                onClick={() => setSource(undefined)}
-                className="rounded-xl bg-[#e9f3ef] p-2 text-[#48635b]"
-              >
-                <X size={17} />
-              </button>
-            </div>
-            <h2 className="mt-8 text-2xl font-black leading-tight">
-              {source.documentTitle}
-            </h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Badge>{accessLabels[source.accessLevel]}</Badge>
-              {source.visibility === "private" && (
-                <Badge tone="gold">Private</Badge>
-              )}
-            </div>
-            <p className="mt-7 text-[10px] font-black uppercase text-[#7c8f87]">
+            className="rounded-xl bg-[#e9f3ef] p-2 text-[#48635b]"
+          >
+            <X size={17} />
+          </button>
+        </div>
+        <h2 className="mt-8 text-2xl font-black leading-tight">
+          {source.documentTitle}
+        </h2>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Badge>{accessLabels[source.accessLevel]}</Badge>
+          {source.visibility === "private" && <Badge tone="gold">Private</Badge>}
+        </div>
+
+        {source.documentId && (
+          <div
+            role="tablist"
+            aria-label="What to show"
+            className="mt-7 inline-flex rounded-xl bg-[#e9f3ef] p-1"
+          >
+            <button
+              role="tab"
+              aria-selected={view === "passages"}
+              onClick={() => setView("passages")}
+              className={tab(view === "passages")}
+            >
+              Passages used
+            </button>
+            <button
+              role="tab"
+              aria-selected={view === "document"}
+              onClick={() => void showDocument()}
+              className={tab(view === "document")}
+            >
+              Full document
+            </button>
+          </div>
+        )}
+
+        {view === "passages" ? (
+          <>
+            <p className="mt-6 text-[10px] font-black uppercase text-[#7c8f87]">
               What Mindbase read from it
             </p>
             <div className="mt-3 space-y-3 rounded-[22px] border border-[#d9e9e2] bg-[#f6fbf8] p-5">
@@ -619,14 +794,78 @@ function ChatWorkspace({ workspace }: { workspace: WorkspaceSummary }) {
                 </p>
               ))}
             </div>
-            <p className="mt-5 text-xs leading-5 text-[#7c8f87]">
-              {source.visibility === "private"
-                ? "This is one of your private files. Only you can see it; nobody else's answers draw on it."
-                : "Personal information was masked before this text was stored or sent to the model."}
-            </p>
-          </aside>
-        </>
-      )}
+          </>
+        ) : (
+          <div className="mt-6 rounded-[22px] border border-[#d9e9e2] bg-white p-5">
+            {full.status === "ready" ? (
+              full.text ? (
+                <HighlightedText
+                  text={full.text}
+                  passages={source.passages}
+                  firstMark={firstMark}
+                />
+              ) : (
+                <p className="text-sm text-[#7c8f87]">
+                  This document has no stored text.
+                </p>
+              )
+            ) : full.status === "error" ? (
+              <p className="text-sm text-[#b53d31]">{full.error}</p>
+            ) : (
+              <div className="flex items-center gap-2 text-xs font-semibold text-[#5f746b]">
+                <Spinner size={15} />
+                Opening the document...
+              </div>
+            )}
+          </div>
+        )}
+
+        <p className="mt-5 text-xs leading-5 text-[#7c8f87]">
+          {view === "document" && full.status === "ready"
+            ? "Highlighted: the passages this answer drew on. "
+            : ""}
+          {source.visibility === "private"
+            ? "This is one of your private files. Only you can see it; nobody else's answers draw on it."
+            : "Personal information was masked before this text was stored or sent to the model."}
+        </p>
+      </aside>
+    </>
+  );
+}
+
+/** A document's text with the given passages marked, as plain text otherwise. */
+function HighlightedText({
+  text,
+  passages,
+  firstMark,
+}: {
+  text: string;
+  passages: string[];
+  firstMark: React.RefObject<HTMLElement | null>;
+}) {
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  passageRanges(text, passages).forEach(([start, end], index) => {
+    if (start > cursor) {
+      parts.push(<Fragment key={`t${index}`}>{text.slice(cursor, start)}</Fragment>);
+    }
+    parts.push(
+      <mark
+        key={`m${index}`}
+        ref={index === 0 ? firstMark : undefined}
+        className="rounded bg-[#fff1b8] px-0.5 text-[#10231e]"
+      >
+        {text.slice(start, end)}
+      </mark>,
+    );
+    cursor = end;
+  });
+  if (cursor < text.length) {
+    parts.push(<Fragment key="rest">{text.slice(cursor)}</Fragment>);
+  }
+  return (
+    <div className="whitespace-pre-wrap text-sm leading-7 text-[#41564d]">
+      {parts}
     </div>
   );
 }
